@@ -128,6 +128,9 @@ class FiniteVec(Vec):
         else:
             return (np.squeeze(mean), np.squeeze(var))
     
+    def sum(self,):
+        return FiniteVec(self.k, self.inspace_points, self.prefactors)
+    
     @classmethod
     def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None,):
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
@@ -144,91 +147,8 @@ class FiniteVec(Vec):
     
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
-    
-    
 
-class SummedVec(Vec):
-    def __init__(self, original: Vec):
-        self.original = original
-    
-    def reduce_gram(self, gram, axis = 0):
-        return self.original.reduce_gram(gram, axis).sum(axis=axis)
 
-    def inner(self, Y=None, full=True):
-        super().inner(Y, full)
-
-    def __len__(self):
-        return 1
-
-class Elem(RkhsObject):
-    def __init__(self, kern, inspace_points, prefactors = None):
-        self.k = kern
-        self.inspace_points = inspace_points
-        
-        if prefactors is None:
-            prefactors = np.ones(len(inspace_points))/len(inspace_points)
-        
-        assert(len(inspace_points) == len(prefactors))
-        self.prefactors = prefactors
-
-    @classmethod
-    def from_FiniteVec(cls, X:FiniteVec):
-        assert(X.is_simple is True, "Can only construct from simple FiniteVec, i.e. one without splits (points_per_split and row_splits are None).")
-        return Elem(X.k, X.inspace_points, X.prefactors)
-    
-    @classmethod
-    def from_estimate(cls, support_points, kernel, est="support", unsigned = True):
-        fact = distr_estimate(support_points, kernel, est=est, unsigned = unsigned, use_jax = False)
-        return Elem(kernel, support_points, fact)
-    
-    def __call__(self, argument):
-        return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
-    
-    def updated(self, prefactors):
-        assert(len(self.prefactors) == len(prefactors))
-        return Elem(self.k, self.inspace_points, prefactors)
-    
-    def normalized(self):
-        return self.updated(self.prefactors / np.sum(self.prefactors))
-    
-    def unsigned_projection(self):        
-        return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k, False))
-        
-    
-    def reduce_gram(self, gram, axis = 0):
-        gram = gram.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
-        gram = np.sum(gram, axis = axis, keepdims=True)
-        return gram
-    
-    def inner(self, Y=None, full=True):
-        if not full and Y is not None:
-            raise ValueError(
-                "Ambiguous inputs: `diagonal` and `y` are not compatible.")
-        if not full:
-            return  self.reduce_gram(self.reduce_gram(self.k(self.inspace_points, full = full), axis = 0), axis = 1)
-        if Y is not None:
-            assert(self.k == Y.k)
-        else:
-            Y = self
-        gram = self.k(self.inspace_points, Y.inspace_points).astype(float)
-        #print("G",gram.shape)
-        r1 = self.reduce_gram(gram, axis = 0)
-        #print("r1",r1.shape)
-        r2 = Y.reduce_gram(r1, axis = 1)
-        #print("r2",r2.shape)
-        return r2
-    
-    def get_mean_var(self):
-        adjusted_points = np.expand_dims(self.prefactors, -1) * self.inspace_points
-
-        mean = np.sum(adjusted_points, axis = 0)
-        variance_of_expectations = np.sum(adjusted_points * self.inspace_points, 0) - mean**2
-
-        return (np.squeeze(mean), np.squeeze(self.k.var + variance_of_expectations))
-    
-    def __len__(self):
-        return 1
-        
 def unsigned_projection(support_points, factors, kernel, use_jax = False):
     import scipy as sp
     from numpy.random import rand
