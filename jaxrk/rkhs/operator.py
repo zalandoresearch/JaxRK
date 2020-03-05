@@ -1,6 +1,6 @@
 import jax.numpy as np
 
-from probkern.rkhs.vector import FiniteVec, inner, Elem
+from jaxrk.rkhs.vector import FiniteVec, inner
 
 from .base import Op, Vec, RkhsObject
 from scipy.optimize import minimize
@@ -16,10 +16,10 @@ class FiniteOp(Op):
     def __len__(self):
         return len(self.inp_feat)
     
-    def solve(self, result:Elem):
+    def solve(self, result:FiniteVec):
         if np.all(self.outp_feat.inspace_points == result.inspace_points):
             s = np.linalg.solve(self.matr @ inner(self.inp_feat, self.inp_feat), result.prefactors)
-            return Elem(result.k, result.inspace_points, s)
+            return FiniteVec.construct_RKHS_Elem(result.k, result.inspace_points, s)
         else:
             assert()
 
@@ -124,5 +124,6 @@ def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T 
     try:
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
     except AttributeError:
-        return Elem.from_FiniteVec(A.outp_feat).updated(np.squeeze(A.matr @ inner(A.inp_feat, B)))
+        assert(len(B) == 1)
+        return FiniteVec.construct_RKHS_Elem(A.outp_feat.k, A.outp_feat.inspace_points, np.squeeze(A.matr @ inner(A.inp_feat, B)))
 

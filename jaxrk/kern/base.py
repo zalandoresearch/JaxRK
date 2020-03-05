@@ -220,6 +220,39 @@ class LaplaceKernel(DensityKernel):
         return stats.laplace.rvs(scale=self._scale, size = (nrows, ncols))
 
 
+class PeriodicKernel(Kernel):
+    def __init__(self, period, lengthscale, ):
+        #self.set_params(log(exp(np.array([s2,df])) - 1))
+        self.ls = lengthscale
+        self.period = period
+        self.diffable = False
+
+
+    def get_params(self):
+        return self.params
+
+    def set_params(self, params):
+        self.params = params
+
+    def gram(self, X, Y=None, diag = False, logsp = False):
+        assert(len(np.shape(X))==2)
+
+        # if X=Y, use more efficient pdist call which exploits symmetry
+
+        if diag:
+            assert()
+        else:
+            if not self.diffable:
+                if Y is None:
+                    sq_dists = squareform(pdist(X, 'sqeuclidean'))
+                else:
+                    assert(len(Y.shape) == 2)
+                    assert(X.shape[1] == Y.shape[1])
+                    sq_dists = cdist(X, Y, 'sqeuclidean')
+        dists = np.sqrt(sq_dists)
+        assert(not logsp)
+        return exp(- 2* np.sin(np.pi*dists/self.period)**2 / self.ls**2)
+
 
 class StudentKernel(DensityKernel):
     def __init__(self, s2, df, diffable = False):

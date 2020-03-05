@@ -1,1 +1,1 @@
-from .base import Kernel, DensityKernel, GaussianKernel
+from .base import Kernel, DensityKernel, GaussianKernel, SplitDimsKernel, PeriodicKernel
