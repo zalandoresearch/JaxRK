@@ -1,2 +1,2 @@
 # JaxRK
-Reproducing Kernels library including RKHS vectors and operators using JAX
+Jax based Reproducing Kernels library for working with RKHS vectors and operators
