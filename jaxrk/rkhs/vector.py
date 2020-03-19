@@ -1,15 +1,18 @@
 import numpy as onp
 import jax.numpy as np
 
-from .base import Vec, Op, RkhsObject
+from typing import Generic, TypeVar
 
+from .base import Vec, Op, RkhsObject
+from jaxrk.rkhs import CovOp, multiply
 
 
 class FiniteVec(Vec):
     """
-        RKHS feature vector
+        RKHS feature vector using 
     """
-    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None, row_splits = None):
+    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None):
+        row_splits = None
         self.k = kern
         self.inspace_points = inspace_points
         assert(len(self.inspace_points.shape) > 1)
@@ -132,13 +135,28 @@ class FiniteVec(Vec):
         return FiniteVec(self.k, self.inspace_points, self.prefactors)
     
     @classmethod
-    def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None,):
+    def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None):
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     @classmethod
-    def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = None, unsigned = True):        
-        prefactors = distr_estimate(inspace_points, kern, est=estimate, unsigned = unsigned, use_jax = False)
-        return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
+    def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1):
+        if False:
+            
+            prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate, unsigned = unsigned, use_jax = True)
+            return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
+        else:
+            assert(estimate == "support")
+            feat = cls(kern, inspace_points)
+            rval2 = multiply(CovOp(feat, regul).inv(), feat.sum())
+
+            G = kern(inspace_points) 
+            G_inv = np.linalg.inv(G + np.eye(inspace_points.shape[0]) * inspace_points.shape[0] * regul)
+            rval = cls.construct_RKHS_Elem(kern, inspace_points, prefactors = np.mean(G_inv @ G_inv @ G, 0)).normalized()
+            if unsigned:
+                return rval.unsigned_projection().normalized(), rval2.unsigned_projection().normalized()
+            else:
+                return rval, rval2
+            
     
     def unsigned_projection(self):
         assert(len(self) == 1)
@@ -166,7 +184,7 @@ def unsigned_projection(support_points, factors, kernel, use_jax = False):
 
     return res["x"]
 
-def distr_estimate(support_points, kernel, est="support", unsigned = True, use_jax = False):
+def distr_estimate_optimization(kernel, support_points, est="support", unsigned = True, use_jax = False):
     import scipy as sp
     from numpy.random import rand
     if use_jax:
@@ -199,9 +217,33 @@ def distr_estimate(support_points, kernel, est="support", unsigned = True, use_j
         assert(est == "support")
         bounds = None
 
-    res = sp.optimize.minimize(cost, rand(len(support_points))+ 0.0001, jac = grad(cost), bounds = bounds)
+    g_cost = grad(cost)
+    res = sp.optimize.minimize(lambda x: cost(x), rand(len(support_points))+ 0.0001, jac = lambda x: g_cost(x), bounds = bounds)
 
     return res["x"]/res["x"].sum()
+
+V1T = TypeVar("V1T")
+V2T = TypeVar("V2T")
+
+class CombVec(Vec, Generic[V1T, V2T]):
+    def __init__(self, v1:V1T, v2:V2T, operation):
+        assert(len(v1) == len(v2))
+        self.__len = len(v1)
+        (self.v1, self.v2) = (v1, v2)
+        self.operation = operation
+
+    def inner(self, Y:"CombVec[V1T, V2T]"=None, full=True):
+        if Y is None:
+            Y = self
+        else:
+            assert(Y.operation == self.operation)
+        return self.operation(self.v1.inner(Y.v1), self.v2.inner(Y.v2))
+
+    def __len__(self):
+        return self.__len
+
+    def updated(self, prefactors):
+        raise NotImplementedError()
 
 
 def inner(X, Y=None, full=True):

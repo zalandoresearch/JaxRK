@@ -62,14 +62,14 @@ class Cmo(FiniteOp):
     def __init__(self, inp_feat:Vec, outp_feat:Vec, regul = 0.01):
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
-        regul = np.array(regul, dtype=inp_feat.inspace_points.dtype)
+        regul = np.array(regul, dtype=np.float32)
         if False:
             op = multiply(CrossCovOp(inp_feat, outp_feat), CovOp(inp_feat, regul).inv())
             (self.inp_feat, self.outp_feat, self.matr) = (op.inp_feat,
                                                           op.outp_feat,
                                                           op.matr)
         else:
-            self.matr = np.diag(self.inp_feat.prefactors) @ np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(inp_feat)))
+            self.matr = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(inp_feat)))
 
 class Cdo(FiniteOp):
     """conditional density operator
@@ -84,7 +84,7 @@ class Cdo(FiniteOp):
         else:
             self.inp_feat = inp_feat
             self.outp_feat = ref_feat
-            cmo_matr = np.diag(self.inp_feat.prefactors) @ np.linalg.inv(inner(self.inp_feat) + regul * tf.eye(len(inp_feat)))
+            cmo_matr = np.linalg.inv(inner(self.inp_feat) + regul * tf.eye(len(inp_feat)))
             assert np.allclose(cmo_matr, Cmo(inp_feat, outp_feat, regul).matr)
 
             inv_gram = np.linalg.inv(inner(ref_feat) + regul * np.eye(len(ref_feat), dtype = ref_feat.prefactors.dtype))
@@ -124,6 +124,10 @@ def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T 
     try:
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
     except AttributeError:
-        assert(len(B) == 1)
-        return FiniteVec.construct_RKHS_Elem(A.outp_feat.k, A.outp_feat.inspace_points, np.squeeze(A.matr @ inner(A.inp_feat, B)))
-
+        if len(B) == 1:
+            #print("len 1")
+            return FiniteVec.construct_RKHS_Elem(A.outp_feat.k, A.outp_feat.inspace_points, np.squeeze(A.matr @ inner(A.inp_feat, B)))
+        else:
+           # print("len "+str(len(B)))
+            pref = A.matr @ inner(A.inp_feat, B)
+            return FiniteVec(A.outp_feat.k, np.tile(A.outp_feat.inspace_points, (pref.shape[1], 1)), pref.flatten(), points_per_split=pref.shape[0])
