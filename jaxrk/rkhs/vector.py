@@ -4,7 +4,6 @@ import jax.numpy as np
 from typing import Generic, TypeVar
 
 from .base import Vec, Op, RkhsObject
-from jaxrk.rkhs import CovOp, multiply
 
 
 class FiniteVec(Vec):
@@ -146,8 +145,6 @@ class FiniteVec(Vec):
             return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
         else:
             assert(estimate == "support")
-            feat = cls(kern, inspace_points)
-            rval2 = multiply(CovOp(feat, regul).inv(), feat.sum())
 
             G = kern(inspace_points) 
             G_inv = np.linalg.inv(G + np.eye(inspace_points.shape[0]) * inspace_points.shape[0] * regul)

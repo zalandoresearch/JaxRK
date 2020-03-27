@@ -36,9 +36,10 @@ def test_multiply():
     res_e1 = multiply(oper, x_e1)
     res_e2 = multiply(oper, x_e2)
     res_v = multiply(oper, x_fv)
-    assert np.allclose(res_v.inspace_points, np.vstack([res_e1.inspace_points, res_e2.inspace_points] ))
-    assert np.allclose(res_v.prefactors, np.hstack([res_e1.prefactors, res_e2.prefactors]))
-    assert np.allclose(multiply(oper, oper), oper.outp_feat.inner(oper.inp_feat))
+    assert np.allclose(res_e1.prefactors, (oper.matr @ oper.inp_feat.inner(x_e1)).flatten()), "Application of operator to RKHS element failed."
+    assert np.allclose(res_v.inspace_points, np.vstack([res_e1.inspace_points, res_e2.inspace_points] )), "Application of operator to all vectors in RKHS vector failed at inspace points."
+    assert np.allclose(res_v.prefactors, np.hstack([res_e1.prefactors, res_e2.prefactors])), "Application of operator to all vectors in RKHS vector failed."
+    assert np.allclose(multiply(oper, oper).matr, oper.inp_feat.inner(oper.outp_feat)), "Application of operator to operator failed."
 
 def test_FiniteOp():
     gk_x = GaussianKernel(0.1)

@@ -130,4 +130,4 @@ def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T 
         else:
            # print("len "+str(len(B)))
             pref = A.matr @ inner(A.inp_feat, B)
-            return FiniteVec(A.outp_feat.k, np.tile(A.outp_feat.inspace_points, (pref.shape[1], 1)), pref.flatten(), points_per_split=pref.shape[0])
+            return FiniteVec(A.outp_feat.k, np.tile(A.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
