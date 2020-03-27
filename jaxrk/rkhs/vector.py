@@ -14,7 +14,7 @@ class FiniteVec(Vec):
         row_splits = None
         self.k = kern
         self.inspace_points = inspace_points
-        assert(len(self.inspace_points.shape) > 1)
+        assert(len(self.inspace_points.shape) == 2)
         if prefactors is None:
             prefactors = np.ones(len(inspace_points))/len(inspace_points)
 
