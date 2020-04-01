@@ -1,7 +1,7 @@
-from distutils.core import setup
+from setuptools import setup
 
 setup(
-  name = 'jaxrk'
+  name = 'jaxrk',
   packages = ['jaxrk'],
   version = '0.1',
   license='MIT',

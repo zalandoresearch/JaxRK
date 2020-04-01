@@ -10,6 +10,8 @@ from jaxrk.rkhs import CovOp, Cdo, Cmo, FiniteOp, FiniteVec, multiply, inner, Si
 from jaxrk.kern import (GaussianKernel, SplitDimsKernel, PeriodicKernel)
 from jaxrk.utilities.array_manipulation import all_combinations
 
+from mixtures_tools import location_mixture_logpdf, mixt
+
 rng = random.PRNGKey(1)
 
 
@@ -61,7 +63,7 @@ def test_FiniteOp():
 
 
 def test_CovOp(plot = False):   
-    import distributions as dist
+    from scipy.stats import multivariate_normal
 
     nsamps = 1000
     samps_unif = None
@@ -72,7 +74,7 @@ def test_CovOp(plot = False):
         samps_unif = nsamps
     gk_x = GaussianKernel(0.2)
 
-    targ = dist.mixt(D, [dist.mvnorm(3*np.ones(D), np.eye(D)*0.7**2), dist.mvnorm(7*np.ones(D), np.eye(D)*1.5**2)], [0.5, 0.5])
+    targ = mixt(D, [multivariate_normal(3*np.ones(D), np.eye(D)*0.7**2), multivariate_normal(7*np.ones(D), np.eye(D)*1.5**2)], [0.5, 0.5])
     out_samps = targ.rvs(nsamps).reshape([nsamps, 1]).astype(float)
     out_fvec = FiniteVec(gk_x, out_samps, np.ones(nsamps))
 
@@ -81,7 +83,7 @@ def test_CovOp(plot = False):
     #gk_x = StudentKernel(0.7, 15)
     x = np.linspace(-2.5, 15, samps_unif)[:, np.newaxis].astype(float)
     ref_fvec = FiniteVec(gk_x, x, np.ones(len(x)))
-    ref_elem = FiniteVec.sum()
+    ref_elem = ref_fvec.sum()
 
     C_ref = CovOp(ref_fvec, regul=0.) # CovOp_compl(out_fvec.k, out_fvec.inspace_points, regul=0.)
 
@@ -90,9 +92,9 @@ def test_CovOp(plot = False):
     #assert(np.allclose(multiply(C_ref.inv(), ref_elem).prefactors, np.sum(np.linalg.inv(inner(ref_fvec)), 0), rtol=1e-02))
 
     C_samps = CovOp(out_fvec, regul=regul_C_ref)
-    unif_obj = multiply(C_samps.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.kern, out_fvec.inspace_points, out_fvec.prefactors).normalized())
+    unif_obj = multiply(C_samps.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.k, out_fvec.inspace_points, out_fvec.prefactors).normalized())
     C_ref = CovOp(ref_fvec, regul=regul_C_ref)
-    dens_obj = multiply(C_ref.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.kern, out_fvec.inspace_points, out_fvec.prefactors)).normalized()
+    dens_obj = multiply(C_ref.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.k, out_fvec.inspace_points, out_fvec.prefactors)).normalized()
     
 
 
@@ -113,7 +115,7 @@ def test_CovOp(plot = False):
         #pl.plot(ref_fvec.inspace_points.squeeze(), np.squeeze(inner(unif_obj, ref_fvec)), label="unif")
         pl.legend(loc="best")
         pl.show()
-    assert(np.std(np.squeeze(inner(unif_obj.normalized(), out_fvec))) < 0.1)
+    assert(np.std(np.squeeze(inner(unif_obj.normalized(), out_fvec))) < 0.15)
 
 
 
@@ -123,7 +125,6 @@ def test_Cdmo(plot = False):
 
     def generate_donut(nmeans = 10, nsamps_per_mean = 50):
         from scipy.stats import multivariate_normal
-        import distributions as dist
         from numpy import exp
 
         def pol2cart(theta, rho):
@@ -135,7 +136,7 @@ def test_Cdmo(plot = False):
         means = pol2cart(np.linspace(0,2*3.141, nmeans + 1)[:-1], 1)
 
         rvs = comp_distribution.rvs(nmeans * nsamps_per_mean) + np.repeat(means, nsamps_per_mean, 0)
-        true_dens = lambda samps: exp(dist.mixture.location_mixture_logpdf(samps, means, np.ones(nmeans) / nmeans, comp_distribution))
+        true_dens = lambda samps: exp(location_mixture_logpdf(samps, means, np.ones(nmeans) / nmeans, comp_distribution))
         return rvs, means, true_dens
 
     x1 = np.ones((1,1))
