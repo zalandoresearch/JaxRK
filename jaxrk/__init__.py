@@ -1,2 +1,1 @@
-from .rkhs import *
-from .kern import *
+from . import (rkhs, kern)
