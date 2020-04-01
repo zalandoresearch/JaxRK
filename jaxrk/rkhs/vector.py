@@ -8,7 +8,7 @@ from .base import Vec, Op, RkhsObject
 
 class FiniteVec(Vec):
     """
-        RKHS feature vector using 
+        RKHS feature vector using input space points. This is the simplest possible vector.
     """
     def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None):
         row_splits = None
@@ -16,7 +16,10 @@ class FiniteVec(Vec):
         self.inspace_points = inspace_points
         assert(len(self.inspace_points.shape) == 2)
         if prefactors is None:
-            prefactors = np.ones(len(inspace_points))/len(inspace_points)
+            if points_per_split is None:
+                prefactors = np.ones(len(inspace_points))/len(inspace_points)
+            else:
+                prefactors = np.ones(len(inspace_points))/points_per_split
 
         assert(prefactors.shape[0] == len(inspace_points))
         assert(len(prefactors.shape) == 1)

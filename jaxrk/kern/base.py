@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Thu Jan 10 10:01:56 2019
 
@@ -14,7 +12,6 @@ from scipy.stats import multivariate_normal
 
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
-import distributions as dist
 
 from scipy.spatial.distance import squareform, pdist, cdist
 
@@ -253,49 +250,6 @@ class PeriodicKernel(Kernel):
         assert(not logsp)
         return exp(- 2* np.sin(np.pi*dists/self.period)**2 / self.ls**2)
 
-
-class StudentKernel(DensityKernel):
-    def __init__(self, s2, df, diffable = False):
-        self.set_params(log(exp(np.array([s2,df])) - 1))
-        self.diffable = diffable
-
-
-    def get_params(self):
-        return self.params
-
-    def set_params(self, params):
-        self.params = params
-        self.dens = dist.mvt(0, log(exp(params[0]) + 1), log(exp(params[1]) + 1))
-
-    def gram(self, X, Y=None, diag = False, logsp = False):
-        assert(len(np.shape(X))==2)
-
-        # if X=Y, use more efficient pdist call which exploits symmetry
-
-        if diag:
-            if Y is None:
-                sq_dists = np.zeros(X.shape[0])
-            else:
-                assert(X.shape == Y.shape)
-                sq_dists = np.sum((X - Y)**2, 1)
-        else:
-            if not self.diffable:
-                if Y is None:
-                    sq_dists = squareform(pdist(X, 'sqeuclidean'))
-                else:
-                    assert(len(Y.shape) == 2)
-                    assert(X.shape[1] == Y.shape[1])
-                    sq_dists = cdist(X, Y, 'sqeuclidean')
-            else:
-                assert(len(np.shape(Y))==2)
-                assert(np.shape(X)[1]==np.shape(Y)[1])
-                sq_dists = ((np.tile(X,(Y.shape[0], 1)) - np.repeat(Y, X.shape[0], 0))**2).sum(-1).reshape(Y.shape[0], X.shape[0]).T
-        dists = np.sqrt(sq_dists)
-        rval = self.dens.logpdf(dists.flatten()).reshape(dists.shape)
-        if not logsp:
-            return rval
-        else:
-            return exp(rval)
 
 class SplitDimsKernel(Kernel):
     def __init__(self, intervals, kernels, operation = "*", weights = None):
