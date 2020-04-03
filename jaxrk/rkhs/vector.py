@@ -1,9 +1,18 @@
-import numpy as onp
+import numpy as onp, scipy as osp
 import jax.numpy as np
+
+from numpy.random import rand
+
+from jax import grad
+from jax.numpy import dot, log
+from jax.scipy.special import logsumexp
 
 from typing import Generic, TypeVar
 
 from .base import Vec, Op, RkhsObject
+
+def __casted_output(function):
+    return lambda x: onp.asarray(function(x), dtype=np.float64)
 
 
 class FiniteVec(Vec):
@@ -142,83 +151,43 @@ class FiniteVec(Vec):
     
     @classmethod
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1):
-        if False:
-            
-            prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate, unsigned = unsigned, use_jax = True)
-            return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
-        else:
-            assert(estimate == "support")
-
-            G = kern(inspace_points) 
-            G_inv = np.linalg.inv(G + np.eye(inspace_points.shape[0]) * inspace_points.shape[0] * regul)
-            rval = cls.construct_RKHS_Elem(kern, inspace_points, prefactors = np.mean(G_inv @ G_inv @ G, 0)).normalized()
-            if unsigned:
-                return rval.unsigned_projection().normalized(), rval2.unsigned_projection().normalized()
-            else:
-                return rval, rval2
+        prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
+        return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
             
     
     def unsigned_projection(self):
         assert(len(self) == 1)
-        return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k, False))
+        return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k))
 
     
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
 
 
-def unsigned_projection(support_points, factors, kernel, use_jax = False):
-    import scipy as sp
-    from numpy.random import rand
-    if use_jax:
-        from jax.numpy import dot
-        from jax import grad
-    else:
-        from autograd.numpy import dot
-        from autograd import grad
-
-    G = kernel(support_points).astype(float)
+def unsigned_projection(support_points, factors, kernel):
+    G = kernel(support_points).astype(np.float64)
     c = 2*np.dot(factors, G)
     cost = lambda f: dot(dot(f, G), f) - dot(c, f)
-    res = sp.optimize.minimize(cost, rand(len(factors))+ 0.0001, jac = grad(cost), bounds = [(0., None)] * len(factors))
+    res = osp.optimize.minimize(__casted_output(cost),
+                               rand(len(factors))+ 0.0001,
+                               jac = __casted_output(grad(cost)),
+                               bounds = [(0., None)] * len(factors))
 
     return res["x"]
 
-def distr_estimate_optimization(kernel, support_points, est="support", unsigned = True, use_jax = False):
-    import scipy as sp
-    from numpy.random import rand
-    if use_jax:
-        from jax.numpy import dot, log
-        from jax.scipy.special import logsumexp
-        from jax import grad
-    else:
-        from autograd.numpy import dot, log
-        from autograd.scipy.special import logsumexp
-        from autograd import grad
+def distr_estimate_optimization(kernel, support_points, est="support"):
+    G = kernel(support_points).astype(np.float64)
 
-    G = kernel(support_points).astype(float)
     if est == "support":
-        #minimum variance of solution evaluated in support points
-        if not unsigned:
-            cost = lambda f: (dot(f, G)**2).mean() - dot(f, G).mean()**2 
-        else:
-            def cost(f):
-                tmp = logsumexp(log(f).reshape((f.size, 1)) + log(G), 0)
-                log_second_moment = logsumexp(tmp * 2) - log(len(tmp))
-                log_expect = logsumexp(tmp) - log(len(tmp))
-                assert()
+        #solution evaluated in support points should be positive constant
+        cost = lambda f: np.abs(dot(f, G) - 1).sum()
     elif est == "density":
         #minimum negative log likelihood of support_points under solution
         cost = lambda f: -log(dot(f, G)).sum()
 
-    if unsigned:
-        bounds = [(0., None)] * len(support_points)
-    else:
-        assert(est == "support")
-        bounds = None
+    bounds = [(0., None)] * len(support_points)
 
-    g_cost = grad(cost)
-    res = sp.optimize.minimize(lambda x: cost(x), rand(len(support_points))+ 0.0001, jac = lambda x: g_cost(x), bounds = bounds)
+    res = osp.optimize.minimize(__casted_output(cost), rand(len(support_points))+ 0.0001, jac = __casted_output(grad(cost)), bounds = bounds)
 
     return res["x"]/res["x"].sum()
 
