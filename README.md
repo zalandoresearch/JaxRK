@@ -9,7 +9,7 @@ $ pip install jaxrk
 
 ## Quick start examples
 
-For some examples of what you can do with JaxRK, see `examples/Quick_start.ipynb`.
+For some examples of what you can do with JaxRK, see [examples/Quick_start.ipynb](https://github.com/zalandoresearch/JaxRK/blob/master/examples/Quick_start.ipynb).
 
 
 ## Development
