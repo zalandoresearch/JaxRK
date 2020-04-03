@@ -1,6 +1,8 @@
 import jax.numpy as np
+import scipy as osp
+from numpy.random import rand
 
-from jaxrk.rkhs.vector import FiniteVec, inner
+from jaxrk.rkhs.vector import FiniteVec, inner, distr_estimate_optimization, __casted_output
 
 from .base import Op, Vec, RkhsObject
 from scipy.optimize import minimize
@@ -117,6 +119,40 @@ class HsTo(FiniteOp):
         else:
             self.inp_feat = timelagged_feat
             self.outp_feat = start_feat
+
+def oper_est_emb(kernel, support_points, inverse_emb = False):
+    G = kernel(support_points).astype(np.float64)
+    emb_pref = np.ones(len(support_points)) / len(support_points)
+    dens_pref = distr_estimate_optimization(kernel, support_points, "density").prefactors
+    
+
+    sol_shape = (len(support_points), len(support_points))
+
+    feats = FiniteVec(kernel, support_points)
+
+    # minimize squared RKHS norm of
+    # mu = C rho
+    #where C is the embedding operator, mu is the embedding, rho the density
+    if not inverse_emb:
+        G_dens_pref = np.dot(G, dens_pref).squeeze()
+        def cost(f): 
+            el = FiniteVec.construct_RKHS_Elem(kernel,
+                                            support_points,
+                                            emb_pref
+                                            - np.dot(f.reshape(sol_shape), G_dens_pref)
+                                            )
+            return el.inner()
+    else:
+        G_emb_pref = np.mean(G, 0)
+        def cost(f): 
+            el = FiniteVec.construct_RKHS_Elem(kernel,
+                                            support_points,
+                                            np.dot(f.reshape(sol_shape), G_emb_pref)
+                                            - dens_pref
+                                            )
+            return el.inner()
+    res = osp.optimize.minimize(__casted_output(cost), rand(np.prod(sol_shape))+ 0.0001, jac = __casted_output(grad(cost)), bounds = bounds)
+    return FiniteOp(feats, feats, res["x"].reshape(sol_shape))
 
 
 def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
