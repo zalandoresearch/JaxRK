@@ -1,6 +1,8 @@
+
 import jax.numpy as np
 import scipy as osp
 from numpy.random import rand
+from jax import grad
 
 from jaxrk.rkhs.vector import FiniteVec, inner, distr_estimate_optimization, __casted_output
 
@@ -123,17 +125,18 @@ class HsTo(FiniteOp):
 def oper_est_emb(kernel, support_points, inverse_emb = False):
     G = kernel(support_points).astype(np.float64)
     emb_pref = np.ones(len(support_points)) / len(support_points)
-    dens_pref = distr_estimate_optimization(kernel, support_points, "density").prefactors
+    dens_pref = distr_estimate_optimization(kernel, support_points, "density").squeeze()
     
 
     sol_shape = (len(support_points), len(support_points))
 
     feats = FiniteVec(kernel, support_points)
 
-    # minimize squared RKHS norm of
-    # mu = C rho
-    #where C is the embedding operator, mu is the embedding, rho the density
+    
     if not inverse_emb:
+        # minimize squared RKHS norm of
+        # mu = C rho
+        # where C is the embedding operator, mu is the embedding, rho the density
         G_dens_pref = np.dot(G, dens_pref).squeeze()
         def cost(f): 
             el = FiniteVec.construct_RKHS_Elem(kernel,
@@ -141,22 +144,23 @@ def oper_est_emb(kernel, support_points, inverse_emb = False):
                                             emb_pref
                                             - np.dot(f.reshape(sol_shape), G_dens_pref)
                                             )
-            return el.inner()
+            return el.inner().squeeze()
     else:
-        G_emb_pref = np.mean(G, 0)
-        def cost(f): 
-            el = FiniteVec.construct_RKHS_Elem(kernel,
-                                            support_points,
-                                            np.dot(f.reshape(sol_shape), G_emb_pref)
-                                            - dens_pref
-                                            )
-            return el.inner()
-    res = osp.optimize.minimize(__casted_output(cost), rand(np.prod(sol_shape))+ 0.0001, jac = __casted_output(grad(cost)), bounds = bounds)
+        print("inverse")
+        # minimize squared RKHS norm of
+        # C mu = rho
+        # where C is the inverse embedding operator, mu is the embedding, rho the density
+        G_mean = G.mean(1).squeeze()
+        dens_pref_2 = dens_pref * 2
+        def cost(f):
+            M = f.reshape(sol_shape)
+            return np.dot(np.squeeze(G_mean @ M) - dens_pref_2 , G @ M @ G_mean)
+    res = osp.optimize.minimize(__casted_output(cost), rand(np.prod(sol_shape))+ 0.0001, jac = __casted_output(grad(cost)))
     return FiniteOp(feats, feats, res["x"].reshape(sol_shape))
 
 
 def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
-    assert(copy_tensors is False, "copy_tensors == True is not implemented yet")
+    assert copy_tensors is False, "copy_tensors == True is not implemented yet"
     try:
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
     except AttributeError:
