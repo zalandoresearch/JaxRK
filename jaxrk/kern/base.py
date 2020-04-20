@@ -149,6 +149,8 @@ class GaussianKernel(DensityKernel):
                     assert(X.shape[1] == Y.shape[1])
                     sq_dists = cdist(X, Y, 'sqeuclidean')
             else:
+                if Y is None:
+                    Y = X
                 assert(len(np.shape(Y))==2)
                 assert(np.shape(X)[1]==np.shape(Y)[1])
                 sq_dists = ((np.tile(X,(Y.shape[0], 1)) - np.repeat(Y, X.shape[0], 0))**2).sum(-1).reshape(Y.shape[0], X.shape[0]).T

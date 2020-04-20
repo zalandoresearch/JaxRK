@@ -151,45 +151,69 @@ class FiniteVec(Vec):
     
     @classmethod
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1):
-        prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
+        prefactors = distr_estimate_optimization(kern, inspace_points, estimate=estimate)
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
             
     
-    def unsigned_projection(self):
+    def unsigned_projection(self, optimize_support = False):
         assert(len(self) == 1)
-        return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k))
+        return unsigned_projection(self.inspace_points, self.prefactors, self.k, optimize_support=optimize_support)
 
     
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
 
 
-def unsigned_projection(support_points, factors, kernel):
-    G = kernel(support_points).astype(np.float64)
-    c = 2*np.dot(factors, G)
-    cost = lambda f: dot(dot(f, G), f) - dot(c, f)
-    res = osp.optimize.minimize(__casted_output(cost),
-                               rand(len(factors))+ 0.0001,
-                               jac = __casted_output(grad(cost)),
-                               bounds = [(0., None)] * len(factors))
+def unsigned_projection(support_points, factors, kernel, optimize_support = False):
+    if not optimize_support:
+        G = kernel(support_points).astype(np.float64)
+        c = 2*np.dot(factors, G)
+        cost = lambda f: dot(dot(f, G), f) - dot(c, f)
+        init = rand(len(factors)) + 0.0001
+        bounds = [(0., None)] * len(factors)
+        res = osp.optimize.minimize(__casted_output(cost),
+                                    init,
+                                    jac = __casted_output(grad(cost)),
+                                    bounds = bounds)
+        
+        return FiniteVec.construct_RKHS_Elem(kernel, support_points, res["x"]).normalized()
+    else:
+        n_supp = len(support_points)
+        def cost(param):
+            f = param[:n_supp]
+            s_p = param[n_supp:].reshape((n_supp, -1))
+            G = kernel(s_p).astype(np.float64)
+            G_mix = kernel(s_p, support_points).astype(np.float64)
+            c = 2*np.dot(G_mix, factors)
+            return dot(dot(f, G), f) - dot(c, f)
+        init = np.hstack([rand(len(factors)) + 0.0001, support_points.flatten()])
+        bounds = [(0., None)] * len(factors)
+        bounds.extend([(None, None)] * support_points.size)
+        res = osp.optimize.minimize(__casted_output(cost),
+                                    init,
+                                    jac = __casted_output(grad(cost)),
+                                    bounds = bounds)
+        
+        return FiniteVec.construct_RKHS_Elem(kernel, res["x"][n_supp:].reshape((n_supp, -1)), res["x"][:n_supp]).normalized()
+        
 
-    return res["x"]
+def distr_estimate_optimization(kern, inspace_points, estimate="support"):
+    G = kern(inspace_points).astype(np.float64)
 
-def distr_estimate_optimization(kernel, support_points, est="support"):
-    G = kernel(support_points).astype(np.float64)
-
-    if est == "support":
+    if estimate == "support":
         #solution evaluated in support points should be constant
         cost = lambda f: np.abs(dot(f, G) - 1).sum()
-    elif est == "density":
-        #minimum negative log likelihood of support_points under solution
+    elif estimate == "density":
+        #minimum negative log likelihood of inspace_points under solution
         cost = lambda f: -log(dot(f, G)).sum()
 
-    bounds = [(0., None)] * len(support_points)
+    bounds = [(0., None)] * len(inspace_points)
 
-    res = osp.optimize.minimize(__casted_output(cost), rand(len(support_points))+ 0.0001, jac = __casted_output(grad(cost)), bounds = bounds)
-
-    return res["x"]/res["x"].sum()
+    res = osp.optimize.minimize(__casted_output(cost), rand(len(inspace_points))+ 0.0001, jac = __casted_output(grad(cost)), bounds = bounds)
+    if res["success"]:
+        return res["x"]/res["x"].sum()
+    else:
+        raise RuntimeError()
 
 V1T = TypeVar("V1T")
 V2T = TypeVar("V2T")
