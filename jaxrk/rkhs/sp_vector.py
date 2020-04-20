@@ -19,10 +19,11 @@ class SpVec(Vec):
         prefactors - prefactor/weight for realization. If use_subtrajectories is True, prefactors for subtrajectories are expected.
         use_subtrajectories - whether to use subtrajectories
     """
-    def __init__(self, kern, idx_obs_points, realization_num_obs, prefactors = None, use_subtrajectories = True):
+    def __init__(self, kern, idx_obs_points, realization_num_obs, prefactors = None, use_subtrajectories = True, use_inner = "gen_gauss"):
         self.k = kern
         self.inspace_points = idx_obs_points
 
+        self.use_inner = use_inner
         
         self.use_subtrajectories = use_subtrajectories
 
@@ -63,7 +64,7 @@ class SpVec(Vec):
     def __len__(self):
         return self.__len
     
-    def inner(self, Y=None, full=True, dist = "gen_gauss"):
+    def inner(self, Y=None, full=True):
         if not full and Y is not None:
             raise ValueError(
                 "Ambiguous inputs: `diagonal` and `y` are not compatible.")
@@ -82,10 +83,10 @@ class SpVec(Vec):
         gram_mix_red = Y.reduce_gram(r1, axis = 1)
         gram_self_red = np.diagonal(self.reduce_gram(self.reduce_gram(gram_self, axis = 0), axis = 1)).reshape((-1, 1))
         gram_other_red = np.diagonal(Y.reduce_gram(Y.reduce_gram(gram_other, axis = 0), axis = 1)).reshape((1, -1))
-        rval = {"gen_gauss":  np.exp(-(gram_self_red + gram_other_red - 2 * gram_mix_red)**0.5), # generalized gaussian
+        rval = {"gen_gauss":  np.exp(-(gram_self_red + gram_other_red - 2 * gram_mix_red)**0.9), # generalized gaussian
                 "linear": gram_mix_red,
-                "poly": (gram_mix_red + 1 )**200}
-        return rval[dist]
+                "poly": (gram_mix_red + 1 )**10}
+        return rval[self.use_inner]
     
     def updated(self, prefactors):
         assert(len(self.prefactors) == len(prefactors))
