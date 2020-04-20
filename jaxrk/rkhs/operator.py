@@ -13,9 +13,11 @@ class FiniteOp(Op):
     """Finite rank RKHS operator
     """
     def __init__(self, inp_feat:Vec, outp_feat:Vec, matr:np.array):
+        assert(len(matr.shape) == 2)
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         self.matr = matr
+
     
     def __len__(self):
         return len(self.inp_feat)
@@ -138,11 +140,12 @@ def oper_est_emb(kernel, support_points, inverse_emb = False):
         # mu = C rho
         # where C is the embedding operator, mu is the embedding, rho the density
         G_dens_pref = np.dot(G, dens_pref).squeeze()
-        def cost(f): 
+        def cost(f):
+            M = np.diag(f)
             el = FiniteVec.construct_RKHS_Elem(kernel,
                                             support_points,
                                             emb_pref
-                                            - np.dot(f.reshape(sol_shape), G_dens_pref)
+                                            - np.dot(M, G_dens_pref)
                                             )
             return el.inner().squeeze()
     else:
@@ -153,13 +156,13 @@ def oper_est_emb(kernel, support_points, inverse_emb = False):
         G_mean = G.mean(1).squeeze()
         dens_pref_2 = dens_pref * 2
         def cost(f):
-            M = f.reshape(sol_shape)
+            M = np.diag(f)
             return np.dot(np.squeeze(G_mean @ M) - dens_pref_2 , G @ M @ G_mean)
-    res = osp.optimize.minimize(__casted_output(cost), rand(np.prod(sol_shape))+ 0.0001, jac = __casted_output(grad(cost)))
-    return FiniteOp(feats, feats, res["x"].reshape(sol_shape))
+    res = osp.optimize.minimize(__casted_output(cost), rand(sol_shape[0])+ 0.0001, jac = __casted_output(grad(cost)))
+    return FiniteOp(feats, feats, np.diag(res["x"]))
 
 
-def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
+def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = False) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
     assert copy_tensors is False, "copy_tensors == True is not implemented yet"
     try:
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
