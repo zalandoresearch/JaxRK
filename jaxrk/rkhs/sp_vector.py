@@ -83,7 +83,7 @@ class SpVec(Vec):
         gram_mix_red = Y.reduce_gram(r1, axis = 1)
         gram_self_red = np.diagonal(self.reduce_gram(self.reduce_gram(gram_self, axis = 0), axis = 1)).reshape((-1, 1))
         gram_other_red = np.diagonal(Y.reduce_gram(Y.reduce_gram(gram_other, axis = 0), axis = 1)).reshape((1, -1))
-        rval = {"gen_gauss":  np.exp(-(gram_self_red + gram_other_red - 2 * gram_mix_red)**0.9), # generalized gaussian
+        rval = {"gen_gauss":  np.exp(-(gram_self_red + gram_other_red - 2 * gram_mix_red)**0.5), # generalized gaussian
                 "linear": gram_mix_red,
                 "poly": (gram_mix_red + 1 )**10}
         return rval[self.use_inner]
