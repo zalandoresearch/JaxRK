@@ -6,7 +6,7 @@ import pytest
 from numpy.testing import assert_allclose
 from jax import random
 
-from jaxrk.rkhs import CovOp, Cdo, Cmo, FiniteOp, FiniteVec, multiply, inner, SiEdSpVec, SpVec, CombVec
+from jaxrk.rkhs import CovOp, Cdo, Cmo, FiniteOp, FiniteVec, multiply, inner, SpVec, CombVec
 from jaxrk.kern import (GaussianKernel, SplitDimsKernel, PeriodicKernel)
 from jaxrk.utilities.array_manipulation import all_combinations
 
