@@ -13,7 +13,7 @@ from scipy.stats import multivariate_normal
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 
-from scipy.spatial.distance import squareform, pdist, cdist
+from jaxrk.utilities.eucldist import eucldist
 
 def median_heuristic(data, distance, per_dimension = True):
     if isinstance(distance, str):
@@ -141,18 +141,8 @@ class GaussianKernel(DensityKernel):
                 assert(X.shape == Y.shape)
                 sq_dists = np.sum((X - Y)**2, 1)
         else:
-            if not self.diffable:
-                if Y is None:
-                    sq_dists = squareform(pdist(X, 'sqeuclidean'))
-                else:
-                    assert(len(Y.shape) == 2)
-                    assert(X.shape[1] == Y.shape[1])
-                    sq_dists = cdist(X, Y, 'sqeuclidean')
-            else:
-                assert(len(np.shape(Y))==2)
-                assert(np.shape(X)[1]==np.shape(Y)[1])
-                sq_dists = ((np.tile(X,(Y.shape[0], 1)) - np.repeat(Y, X.shape[0], 0))**2).sum(-1).reshape(Y.shape[0], X.shape[0]).T
-
+            sq_dists = eucldist(X, Y, power = 2)
+            
         rval = self._const_factor* sq_dists - self._log_norm * np.shape(X)[1]
         if not logsp:
             return exp(rval)
@@ -195,18 +185,7 @@ class LaplaceKernel(DensityKernel):
                 assert(X.shape == Y.shape)
                 dists = np.sum((X - Y)**2, 1)
         else:
-            if not self.diffable:
-                if Y is None:
-                    dists = squareform(pdist(X, 'cityblock'))
-                else:
-                    assert(len(Y.shape) == 2)
-                    assert(X.shape[1] == Y.shape[1])
-                    dists = cdist(X, Y, 'cityblock')
-            else:
-                assert(len(np.shape(Y))==2)
-                assert(np.shape(X)[1]==np.shape(Y)[1])
-                assert("This is not tested!")
-                dists = (np.abs(np.tile(X,(Y.shape[0], 1)) - np.repeat(Y, X.shape[0], 0))).sum(-1).reshape(Y.shape[0], X.shape[0]).T
+            dists = sq_dists = eucldist(X, Y, power = 1.)
 
         rval = self._const_factor * dists - self._log_norm * np.shape(X)[1]
         if not logsp:
@@ -239,14 +218,7 @@ class PeriodicKernel(Kernel):
         if diag:
             assert()
         else:
-            if not self.diffable:
-                if Y is None:
-                    sq_dists = squareform(pdist(X, 'sqeuclidean'))
-                else:
-                    assert(len(Y.shape) == 2)
-                    assert(X.shape[1] == Y.shape[1])
-                    sq_dists = cdist(X, Y, 'sqeuclidean')
-        dists = np.sqrt(sq_dists)
+            dists = eucldist(X, Y, power = 1.)
         assert(not logsp)
         return exp(- 2* np.sin(np.pi*dists/self.period)**2 / self.ls**2)
 
