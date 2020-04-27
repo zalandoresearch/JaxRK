@@ -119,8 +119,8 @@ class HsTo(FiniteOp):
             self.outp_feat = start_feat
 
 
-def multiply(A:FiniteOp, B:RkhsObject, copy_tensors = True) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
-    assert(copy_tensors is False, "copy_tensors == True is not implemented yet")
+def multiply(A:FiniteOp, B:RkhsObject) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
+    
     try:
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
     except AttributeError:
