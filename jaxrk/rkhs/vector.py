@@ -3,9 +3,12 @@ import jax.numpy as np
 
 from numpy.random import rand
 
+import jax
+from time import time
 from jax import grad
 from jax.numpy import dot, log
 from jax.scipy.special import logsumexp
+#from jaxrk.utilities.frank_wolfe import frank_wolfe_unsigned_projection
 
 from typing import Generic, TypeVar
 
@@ -32,7 +35,7 @@ class FiniteVec(Vec):
 
         assert(prefactors.shape[0] == len(inspace_points))
         assert(len(prefactors.shape) == 1)
-
+        self.prngkey = jax.random.PRNGKey(np.int64(time()))
         self.__reconstruction_kwargs = {}
 
         self.prefactors = prefactors
@@ -153,11 +156,20 @@ class FiniteVec(Vec):
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1):
         prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
-            
     
-    def unsigned_projection(self):
+    def point_representant(self, sample = False):
+        n = self.unsigned_projection().normalized()
+        if not sample:
+            return n.inspace_points[np.argmax(n.prefactors.flatten()), :]
+        else:
+            return n.inspace_points[jax.random.categorical(log(n.prefactors.flatten())), :]
+    
+    def unsigned_projection(self, nsamps = None):
         assert(len(self) == 1)
-        return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k))
+        if nsamps is None:
+            return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k))
+        else:
+            return frank_wolfe_unsigned_projection(self, self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k)), nsamps - self.inspace_points.shape[0])
 
     
     def __call__(self, argument):
