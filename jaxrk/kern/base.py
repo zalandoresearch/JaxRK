@@ -103,6 +103,47 @@ def pos_param(x):
 def inv_pos_param(y):
     return np.where(y >= 1, y,  log(exp(y) - 1) + 1)
 
+
+class GenGaussKernel: #this is the gennorm distribution from scipy
+    def __init__(self, sigma = np.array([1.]), power = np.array([2.])):
+        assert(np.all(sigma > 0))
+        assert(np.all(power >= 0))
+        assert(np.all(power <= 2))
+        self.sigma = sigma
+        self.__set_standard_dev(sigma)
+        self.power = power
+
+
+    def __set_standard_dev(self, sd):
+        assert(np.all(sd > 0))
+        self._sd = sd
+        self.var = sd**2
+        self._const_factor = -0.5 / sd**2
+        self._normalization = (sqrt(2*np.pi)*sd)
+        self._log_norm = log(self._normalization)
+
+    def get_var(self):
+        return self._sd**2
+
+    def gram(self, X, Y=None, diag = False, logsp = False):
+        assert(len(np.shape(X))==2)
+
+        # if X=Y, use more efficient pdist call which exploits symmetry
+
+        if diag:
+            if Y is None:
+                sq_dists = np.zeros(X.shape[0])
+            else:
+                assert(X.shape == Y.shape)
+                sq_dists = np.sum((X - Y)**2, 1)
+        else:
+            sq_dists = eucldist(X, Y, power = self.power)
+            
+        rval = self._const_factor* sq_dists - self._log_norm * np.shape(X)[1]
+        if not logsp:
+            return exp(rval)
+        return rval
+
 class GaussianKernel(DensityKernel):
     def __init__(self, sigma = np.array([1]), diffable = False):
         self.set_params(pos_param(sigma))
