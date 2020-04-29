@@ -1,14 +1,22 @@
 import jax.numpy as np
 
+from typing import TypeVar,  Generic
 from jaxrk.rkhs.vector import FiniteVec, inner
 
 from .base import Op, Vec, RkhsObject
 from scipy.optimize import minimize
 
-class FiniteOp(Op):
+#VecSubType = NewType("VecSubType", Vec)
+InpVecT = TypeVar("InpVecT", bound=Vec)
+IntermVecT = TypeVar("IntermVecT", bound=Vec)
+OutVecT = TypeVar("OutVecT", bound=Vec)
+
+
+
+class FiniteOp(Op[InpVecT, OutVecT]):
     """Finite rank RKHS operator
     """
-    def __init__(self, inp_feat:Vec, outp_feat:Vec, matr:np.array):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array):
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         self.matr = matr
@@ -25,8 +33,8 @@ class FiniteOp(Op):
 
 
 
-class CrossCovOp(FiniteOp):
-    def __init__(self, inp_feat:Vec, outp_feat:Vec, regul = 0.01):
+class CrossCovOp(FiniteOp[InpVecT, OutVecT]):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
         assert len(inp_feat) == len(outp_feat)
         assert np.allclose(inp_feat.prefactors, outp_feat.prefactors)
         self.inp_feat = inp_feat
@@ -34,8 +42,8 @@ class CrossCovOp(FiniteOp):
         self.matr = np.diag((inp_feat.prefactors + outp_feat.prefactors)/2)
         self.regul = regul
 
-class CovOp(FiniteOp):
-    def __init__(self, inp_feat:FiniteVec, regul = 0.01):
+class CovOp(FiniteOp[InpVecT, InpVecT]):
+    def __init__(self, inp_feat:InpVecT, regul = 0.01):
         self.inp_feat = self.outp_feat = self.inp_feat = inp_feat.updated(np.ones(len(inp_feat),dtype = inp_feat.prefactors.dtype))
         self.matr = np.diag(inp_feat.prefactors)
         self._inv = None
@@ -56,10 +64,10 @@ class CovOp(FiniteOp):
         return self._inv
         
 
-class Cmo(FiniteOp):
+class Cmo(FiniteOp[InpVecT, OutVecT]):
     """conditional mean operator
     """
-    def __init__(self, inp_feat:Vec, outp_feat:Vec, regul = 0.01):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         regul = np.array(regul, dtype=np.float32)
@@ -71,10 +79,10 @@ class Cmo(FiniteOp):
         else:
             self.matr = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(inp_feat)))
 
-class Cdo(FiniteOp):
+class Cdo(FiniteOp[InpVecT, OutVecT]):
     """conditional density operator
     """
-    def __init__(self, inp_feat:Vec, outp_feat:Vec, ref_feat:Vec, regul = 0.01):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01):
         
         if True:
             op = multiply(CovOp(ref_feat, regul).inv(), Cmo(inp_feat, outp_feat, regul))
@@ -93,10 +101,10 @@ class Cdo(FiniteOp):
             self.matr =  preimg_factor @ inner(ref_feat, outp_feat) @ cmo_matr
 
 
-class HsTo(FiniteOp): 
+class HsTo(FiniteOp[InpVecT, InpVecT]): 
     """RKHS transfer operators
     """
-    def __init__(self, start_feat:Vec, timelagged_feat:Vec, regul = 0.01, embedded = False, koopman = False):
+    def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = False, koopman = False):
         self.embedded = embedded
         self.koopman = koopman
         assert(start_feat.k == timelagged_feat.k)
@@ -119,15 +127,14 @@ class HsTo(FiniteOp):
             self.outp_feat = start_feat
 
 
-def multiply(A:FiniteOp, B:RkhsObject) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
-    
-    try:
+CombT = TypeVar("CombT", FiniteOp[InpVecT, IntermVecT], IntermVecT)
+
+def multiply(A:FiniteOp[IntermVecT, OutVecT], B:CombT) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
+    if isinstance(B, FiniteOp):
         return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
-    except AttributeError:
+    else:
         if len(B) == 1:
-            #print("len 1")
             return FiniteVec.construct_RKHS_Elem(A.outp_feat.k, A.outp_feat.inspace_points, np.squeeze(A.matr @ inner(A.inp_feat, B)))
         else:
-           # print("len "+str(len(B)))
             pref = A.matr @ inner(A.inp_feat, B)
             return FiniteVec(A.outp_feat.k, np.tile(A.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])

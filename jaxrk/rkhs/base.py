@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 
+from typing import NewType, TypeVar, Generic, Sized
 
 class RkhsObject(object):
     pass
 
-class Vec(RkhsObject):
+class Vec(RkhsObject, Sized):
     @abstractmethod
     def reduce_gram(self, gram, axis = 0):
         pass
@@ -17,7 +18,10 @@ class Vec(RkhsObject):
     def __len__(self):
         pass
 
-class Op(RkhsObject):    
+InpVecT = TypeVar("InpVecT", bound=Vec)
+OutVecT = TypeVar("OutVecT", bound=Vec)
+
+class Op(RkhsObject, Generic[InpVecT, OutVecT]):    
     @abstractmethod
     def __len__(self):
         pass
