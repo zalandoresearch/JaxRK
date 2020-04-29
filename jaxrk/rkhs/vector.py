@@ -162,7 +162,7 @@ class FiniteVec(Vec):
         if not sample:
             return n.inspace_points[np.argmax(n.prefactors.flatten()), :]
         else:
-            return n.inspace_points[jax.random.categorical(log(n.prefactors.flatten())), :]
+            return n.inspace_points[jax.random.categorical(self.prngkey, log(n.prefactors.flatten())), :]
     
     def unsigned_projection(self, nsamps = None):
         assert(len(self) == 1)
