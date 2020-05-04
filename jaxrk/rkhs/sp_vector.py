@@ -3,6 +3,9 @@ from jax import jit, vmap, lax
 
 from .base import Vec, Op, RkhsObject
 
+from jaxrk.rkhs.vector import FiniteVec
+from jaxrk.rkhs.operator import Cmo, multiply
+
 class SpVec(Vec):
     # FIXME: Reference index enters Kernel regression as input; with shift-invariant kernel we get dependence on reference index
     # other idea: different kernel on the embedded "joint"
@@ -37,7 +40,7 @@ class SpVec(Vec):
         self.use_subtrajectories = use_subtrajectories
 
         if not use_subtrajectories:
-            self.__reduce_sum_func = lambda x: np.mean(x, axis = 0, keepdims = True) 
+            self.__reduce_sum_func = lambda x: np.mean(x, axis = 0, keepdims = True)
             self.__len = len(self.process_boundaries[:-1])
         else:
             def reduce_func(x):
@@ -49,6 +52,7 @@ class SpVec(Vec):
 
     def __eq__(self, other):
         return (isinstance(other, self.__class__) and
+                other.inspace_points.shape == self.inspace_points.shape and
                 np.all(other.inspace_points == self.inspace_points) and
                 other.k == self.k )
 
@@ -77,13 +81,16 @@ class SpVec(Vec):
         elif self.use_inner == "gen_gauss":
             gram_self_red = np.diagonal(self.reduce_gram(self.reduce_gram(gram_self, axis = 0), axis = 1)).reshape((-1, 1))
             gram_other_red = np.diagonal(Y.reduce_gram(Y.reduce_gram(gram_other, axis = 0), axis = 1)).reshape((1, -1))
-            return np.clip(gram_self_red + gram_other_red - 2 * gram_mix_red, 0)
+            return {"gram_mix_red": gram_mix_red,
+                    "gram_self_red": gram_self_red,
+                    "gram_other_red": gram_other_red}
     
     def _inner_process_raw(self, raw):
         if self.use_inner =="gen_gauss": 
-            return np.exp(-raw**0.5) # generalized gaussian
+            dist = np.clip(raw["gram_self_red"] + raw["gram_other_red"] - 2 * raw["gram_mix_red"], 0)
+            return np.exp(-dist**0.5) # generalized gaussian
         elif self.use_inner =="linear": 
-            return raw
+            return 20*raw
         elif self.use_inner == "poly":
             return (raw + 1 )**10
 
@@ -103,3 +110,61 @@ class SpVec(Vec):
         if axis != 0:
             rval = np.swapaxes(rval, axis, 0)
         return rval
+
+class RolloutSpVec(object):
+    def __init__(self, cm_op:Cmo[SpVec, FiniteVec], initial_spvec:SpVec, dim_index):
+        assert(len(initial_spvec) == 1)
+        self._inc = (initial_spvec.inspace_points[1:, :dim_index] -  initial_spvec.inspace_points[:-1, :dim_index]).mean(0)
+        self._cmo = cm_op
+        self._current_raw = self._cmo.inp_feat._inner_raw(initial_spvec)
+        self._num_obs = initial_spvec.inspace_points.shape[0]
+        self._next_idx = initial_spvec.inspace_points[-1,  :dim_index] + self._inc
+        self._spvec_history = initial_spvec
+
+        gram = self._cmo.inp_feat._inner_process_raw(self._current_raw)
+        self._current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
+                                                                self._cmo.outp_feat.inspace_points,
+                                                                np.squeeze(self._cmo.matr @ gram))
+
+    def current_outp_emb(self):
+        gram = self._cmo.inp_feat._inner_process_raw(self._current_raw)
+        return self._current_outp_emb.updated(np.squeeze(self._cmo.matr @ gram))
+
+    def update(self, new_point):
+        new_idx_obs = np.array((self._next_idx, new_point)).reshape(1,-1)
+        self._next_idx += self._inc
+        if self._cmo.inp_feat.use_inner != "gen_gauss":
+            gram_mixed = self._current_raw
+        else:
+            gram_mixed = self._current_raw["gram_mix_red"]
+        upd_mixed = self._cmo.inp_feat.reduce_gram(self._cmo.inp_feat.k(self._cmo.inp_feat.inspace_points, new_idx_obs))
+        new_gram_mixed = (gram_mixed * self._num_obs + upd_mixed)/(self._num_obs + 1)
+        if self._cmo.inp_feat.use_inner != "gen_gauss":
+            self._current_raw = new_gram_mixed
+        else:
+            # (r_G_f1*num_obs**2 + (2*G_f1_new.mean()*num_obs+G_new))/(num_obs+1)**2
+            self._current_raw["gram_mix_red"] = new_gram_mixed
+
+            history_newpoint = self._spvec_history.reduce_gram(self._spvec_history.k(self._spvec_history.inspace_points,
+                                                                                     new_idx_obs))
+            upd_self = self._spvec_history.k(new_idx_obs) + 2 * self._num_obs * history_newpoint
+
+            self._current_raw["gram_other_red"] = (self._current_raw["gram_other_red"] * self._num_obs**2 + upd_self) / (self._num_obs + 1)**2
+
+            self._spvec_history = SpVec(self._cmo.inp_feat.k,
+                                        np.vstack([self._spvec_history.inspace_points, new_idx_obs]),
+                                        np.array([self._num_obs + 1]),
+                                        use_subtrajectories = False,
+                                        use_inner=self._cmo.inp_feat.use_inner)
+
+            # What follows is debugging code to check for correctly computed updates
+            # if False:
+            #     ind = self._cmo.inp_feat._inner_raw(self._spvec_history)
+            #     for k in self._current_raw:
+            #         ind_k, upd_k = ind[k], self._current_raw[k]
+            #         if not (np.allclose(ind_k, upd_k)):
+            #             print(np.abs(ind_k - upd_k).max())
+
+        self._num_obs += 1
+        inp_gram = self._spvec_history._inner_process_raw(self._current_raw).squeeze()
+        self._current_outp_emb = self._current_outp_emb.updated(self._cmo.matr @ inp_gram)
