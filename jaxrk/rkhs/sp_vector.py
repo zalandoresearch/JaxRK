@@ -88,9 +88,9 @@ class SpVec(Vec):
     def _inner_process_raw(self, raw):
         if self.use_inner =="gen_gauss": 
             dist = np.clip(raw["gram_self_red"] + raw["gram_other_red"] - 2 * raw["gram_mix_red"], 0)
-            return np.exp(-dist**0.5) # generalized gaussian
+            return np.exp(-dist**0.6) # generalized gaussian
         elif self.use_inner =="linear": 
-            return 20*raw
+            return 500*raw
         elif self.use_inner == "poly":
             return (raw + 1 )**10
 
@@ -122,13 +122,9 @@ class RolloutSpVec(object):
         self._spvec_history = initial_spvec
 
         gram = self._cmo.inp_feat._inner_process_raw(self._current_raw)
-        self._current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
+        self.current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
                                                                 self._cmo.outp_feat.inspace_points,
                                                                 np.squeeze(self._cmo.matr @ gram))
-
-    def current_outp_emb(self):
-        gram = self._cmo.inp_feat._inner_process_raw(self._current_raw)
-        return self._current_outp_emb.updated(np.squeeze(self._cmo.matr @ gram))
 
     def update(self, new_point):
         new_idx_obs = np.array((self._next_idx, new_point)).reshape(1,-1)
@@ -167,4 +163,4 @@ class RolloutSpVec(object):
 
         self._num_obs += 1
         inp_gram = self._spvec_history._inner_process_raw(self._current_raw).squeeze()
-        self._current_outp_emb = self._current_outp_emb.updated(self._cmo.matr @ inp_gram)
+        self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
