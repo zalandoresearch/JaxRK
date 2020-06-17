@@ -74,6 +74,9 @@ class FiniteVec(Vec):
     def __len__(self):
         return self.__len
     
+    def __neg__(self):
+        self.updated(-self.prefactors)
+    
     def __normalized_balanced__(self):
         upd_pref = self.__reshape_balanced__(self.prefactors.reshape((-1, 1)))#.squeeze()
         upd_pref = upd_pref / upd_pref.sum(1, keepdims=True)

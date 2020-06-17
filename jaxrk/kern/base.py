@@ -5,15 +5,19 @@ Created on Thu Jan 10 10:01:56 2019
 """
 
 
-import jax.numpy as np, jax.scipy as sp, jax.scipy.stats as stats
+from typing import Callable
+
+import jax.numpy as np
+import jax.scipy as sp
+import jax.scipy.stats as stats
 from jax.experimental.vectorize import vectorize
+from jax.numpy import exp, log, sqrt
+from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
 
-from jax.numpy import exp, log, sqrt
-from jax.scipy.special import logsumexp
-
 from jaxrk.utilities.eucldist import eucldist
+
 
 def median_heuristic(data, distance, per_dimension = True):
     if isinstance(distance, str):
@@ -28,52 +32,49 @@ def median_heuristic(data, distance, per_dimension = True):
         return np.apply_along_axis(single_dim_heuristic, 0, data)
 
 class Kernel(object):
+    """A generic kernel type."""
     def __call__(self, *args, **kwargs):
         return self.gram(*args, **kwargs)
 
-    def gram(self, X, Y = None, diag = False):
-        """compute the gram matrix, i.e. the kernel evaluated at every element of X paired with each element of Y"""
+    def gram(self, X, Y = None, diag = False) -> np.array:
+        """Compute the gram matrix, i.e. the kernel evaluated at every element of X paired with each element of Y (if not None, otherwise each element of X).
+
+        Args:
+            X: input space points, one per row.
+            Y: input space points, one per row. If none, default to Y = X.
+            diag: if `True`, compute only the diagonal elements of the gram matrix.
+
+        Returns:
+            The gram matrix or its diagonal, depending on passed parameters."""
         raise NotImplementedError()
 
-    def get_params(self):
-        # get unconstrained parameters
+    def get_params(self) -> np.array:
+        """Get parameters of this particular kernel.
+
+        Returns: Unconstrained parameteres as a flat numpy array."""
         assert()
 
-    def set_params(self, params):
-        # set unconstrained parameters, possibly transform them
+    def set_params(self, params : np.array) -> None:
+        """Set unconstrained parameters, possibly after transformin them.
+
+        Args:
+            params: Unconstrained parameters.
+        """
         assert()
-
-    def rkhsel_gram(self, X, Y = None, logsp = False):
-        """
-        X - axis 0 contains observations (of sample sets), axis 1 is input dimension, axis 2 are different points per observation (the samples of a sample set)
-        """
-
-        assert(not logsp)
-        if Y is not None:
-            assert(len(Y.shape) == 2)
-        if len(X.shape) == 2:
-            return self.gram(X, Y)
-        assert(len(X.shape) == 3)
-        
-        X_resh = np.concatenate(np.swapaxes(X,0,2), axis=1).T #np.swapaxes(X, 1,2).reshape(-1, X.shape[1])
-        if Y is None:
-            # compute the full gram matrix
-            G = self.gram(X_resh)
-            # sum up the blockmatrices of shape (X.shape[2], X.shape[2]) that make up G
-            G = np.mean(np.split(np.mean(np.split(G, X.shape[2], 1), 0), X.shape[2]), 0)
-
-            # return the matrix of RKHS inner products of the mean embeding objects
-            return G
-        else:
-            return np.mean(np.split(self.gram(X_resh, Y), X.shape[2]), 0)
 
 class DensityKernel(Kernel):
+    """Type for positive definite kernels that are also densities."""
     def rvs(self, nsamps):
         raise NotImplementedError()    
 
 
 class FeatMapKernel(Kernel):
-    def __init__(self, feat_map):
+    """A kernel that is defined by a feature map.
+    
+    Args:
+        feat_map: A callable that computes the feature map, i.e. given input space points it returns real valued features, one per input space point."""
+
+    def __init__(self, feat_map:Callable):
         self.features = feat_map
 
     def features_mean(self, samps):
