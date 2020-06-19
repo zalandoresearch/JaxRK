@@ -1,1 +1,4 @@
-from .base import Kernel, DensityKernel, GenGaussKernel,  GaussianKernel, SplitDimsKernel, PeriodicKernel
+from .base import Kernel, DensityKernel, PeriodicKernel
+from .simple import FeatMapKernel, LinearKernel, PeriodicKernel
+from .rbf import GenGaussKernel,  GaussianKernel
+from .adapt_combine import SplitDimsKernel, SKlKernel
