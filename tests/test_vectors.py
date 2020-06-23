@@ -21,7 +21,7 @@ kernel_setups = [
 @pytest.mark.parametrize('D', [1, 5])
 @pytest.mark.parametrize('kernel', kernel_setups)
 @pytest.mark.parametrize('N', [10])
-def test_FiniteVec(D = 1, kernel = kernel_setups[0], N = 10):
+def test_FiniteVec(D, kernel, N):
     X = rng.randn(N, D)
     rv = FiniteVec(kernel, X, np.ones(len(X)).astype(np.float32))
     rv2 = FiniteVec.construct_RKHS_Elem(kernel, rng.randn(N + 1, D), np.ones(N + 1).astype(np.float32))
@@ -53,7 +53,7 @@ def test_FiniteVec(D = 1, kernel = kernel_setups[0], N = 10):
 
 @pytest.mark.parametrize('D', [1, 5])
 @pytest.mark.parametrize('kernel', kernel_setups)
-def test_Mean_var(D = 1, kernel = kernel_setups[0]):
+def test_Mean_var(D, kernel):
     N = 4
 
    

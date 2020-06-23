@@ -45,7 +45,7 @@ def test_multiply():
 
 def test_FiniteOp():
     gk_x = GaussianKernel(0.1)
-    x = np.linspace(-2.5, 15, 20)[:, np.newaxis].astype(np.float)
+    x = np.linspace(-2.5, 15, 20)[:, np.newaxis].astype(np.float32)
     #x = np.random.randn(20, 1).astype(np.float)
     ref_fvec = FiniteVec(gk_x, x, np.ones(len(x)))
     ref_elem = FiniteVec.construct_RKHS_Elem(gk_x, x, np.ones(len(x)))
@@ -57,9 +57,9 @@ def test_FiniteOp():
     assert(np.allclose(multiply(C2, ref_elem).prefactors, np.sum(C1.matr, 0)))
 
     n_rvs = 50
-    rv_fvec = FiniteVec(gk_x, np.random.randn(n_rvs).reshape((-1, 1)) * 5, np.ones(n_rvs))
+    rv_fvec = FiniteVec(gk_x, random.normal(rng, (n_rvs, 1)) * 5, np.ones(n_rvs))
     C3 = FiniteOp(rv_fvec, rv_fvec, np.eye(n_rvs))
-    assert(np.allclose(multiply(C3, C1).matr, gk_x(rv_fvec.inspace_points, ref_fvec.inspace_points) @ C1.matr), 0.001, 0.001)
+    assert np.allclose(multiply(C3, C1).matr, gk_x(rv_fvec.inspace_points, ref_fvec.inspace_points) @ C1.matr, 0.001, 0.001)
 
 
 def test_CovOp(plot = False):   
@@ -77,10 +77,9 @@ def test_CovOp(plot = False):
     targ = mixt(D, [multivariate_normal(3*np.ones(D), np.eye(D)*0.7**2), multivariate_normal(7*np.ones(D), np.eye(D)*1.5**2)], [0.5, 0.5])
     out_samps = targ.rvs(nsamps).reshape([nsamps, 1]).astype(float)
     out_fvec = FiniteVec(gk_x, out_samps, np.ones(nsamps))
-
+    out_meanemb = out_fvec.sum()
     
-    #gk_x = LaplaceKernel(3)
-    #gk_x = StudentKernel(0.7, 15)
+
     x = np.linspace(-2.5, 15, samps_unif)[:, np.newaxis].astype(float)
     ref_fvec = FiniteVec(gk_x, x, np.ones(len(x)))
     ref_elem = ref_fvec.sum()
@@ -88,34 +87,30 @@ def test_CovOp(plot = False):
     C_ref = CovOp(ref_fvec, regul=0.) # CovOp_compl(out_fvec.k, out_fvec.inspace_points, regul=0.)
 
     inv_Gram_ref = np.linalg.inv(inner(ref_fvec))
-    assert(np.allclose((inv_Gram_ref@inv_Gram_ref)/ C_ref.inv().matr, 1., atol = 1e-3))
-    #assert(np.allclose(multiply(C_ref.inv(), ref_elem).prefactors, np.sum(np.linalg.inv(inner(ref_fvec)), 0), rtol=1e-02))
 
     C_samps = CovOp(out_fvec, regul=regul_C_ref)
-    unif_obj = multiply(C_samps.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.k, out_fvec.inspace_points, out_fvec.prefactors).normalized())
+    unif_obj = C_samps.solve(out_meanemb)
     C_ref = CovOp(ref_fvec, regul=regul_C_ref)
-    dens_obj = multiply(C_ref.inv(), FiniteVec.construct_RKHS_Elem(out_fvec.k, out_fvec.inspace_points, out_fvec.prefactors)).normalized()
+    dens_obj = C_ref.solve(out_meanemb)
     
 
 
-    #dens_obj.prefactors = np.sum(dens_obj.prefactors, 1)
-    #dens_obj.prefactors = dens_obj.prefactors / np.sum(dens_obj.prefactors)
-    #print(np.sum(dens_obj.prefactors))
-    #p = np.sum(inner(dens_obj, ref_fvec), 1)
     targp = np.exp(targ.logpdf(ref_fvec.inspace_points.squeeze())).squeeze()
     estp = np.squeeze(inner(dens_obj, ref_fvec))
     estp2 = np.squeeze(inner(dens_obj.unsigned_projection().normalized(), ref_fvec))
-    assert(np.abs(targp.squeeze()-estp).mean() < 0.8)
+    est_sup = unif_obj(x).squeeze()
+    assert (np.abs(targp.squeeze()-estp).mean() < 0.8), "Estimated density strongly deviates from true density"
     if plot:
         pl.plot(ref_fvec.inspace_points.squeeze(), estp/np.max(estp) * np.max(targp), "b--", label="scaled estimate")
         pl.plot(ref_fvec.inspace_points.squeeze(), estp2/np.max(estp2) * np.max(targp), "g-.", label="scaled estimate (uns)")
         pl.plot(ref_fvec.inspace_points.squeeze(), targp, label = "truth")
-        
+        pl.plot(x.squeeze(), est_sup.squeeze(), label = "support")
         
         #pl.plot(ref_fvec.inspace_points.squeeze(), np.squeeze(inner(unif_obj, ref_fvec)), label="unif")
         pl.legend(loc="best")
         pl.show()
-    assert(np.std(np.squeeze(inner(unif_obj.normalized(), out_fvec))) < 0.15)
+    supp = unif_obj(x).squeeze()
+    assert (np.std(supp) < 0.15), "Estimated support has high variance, in data points, while it should be almost constant."
 
 
 
@@ -175,6 +170,7 @@ def test_Cdmo(plot = False):
 
 
 def test_Cdo_timeseries(plot = False):
+    raise NotImplementedException
     if plot:
         import pylab as pl
     x = np.linspace(0, 40, 400).reshape((-1, 1))
@@ -206,7 +202,7 @@ def test_Cdo_timeseries(plot = False):
 
 
     print(sol)
-    return sol2.T[0], sol.T[0][200:], y[200:]
+    return sol2.T[0], sol[0][200:], y[200:]
     (true_x1, est_x1, este_x1, true_x2, est_x2, este_x2) = [lambda samps: true_dens(np.hstack([np.repeat(x1, len(samps), 0), samps])),
                                                             lambda samps: np.squeeze(inner(multiply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
                                                             lambda samps: np.squeeze(inner(multiply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),

@@ -45,7 +45,7 @@ class FiniteVec(Vec):
             self.__reduce_gram__ = self.__reduce_balanced_ragged__
             self.is_simple = False
             if points_per_split is not None:
-                assert(row_splits is None, "Either of points_per_split or row_splits can be set, but not both.")
+                assert row_splits is None, "Either of points_per_split or row_splits can be set, but not both."
                 #balanced split: each feature vector element has and equal number of input space points
                 self.points_per_split = points_per_split
                 self.__len = len(self.inspace_points) // self.points_per_split
@@ -149,7 +149,7 @@ class FiniteVec(Vec):
             return (np.squeeze(mean), np.squeeze(var))
     
     def sum(self,):
-        return FiniteVec(self.k, self.inspace_points, self.prefactors)
+        return FiniteVec(self.k, self.inspace_points, self.prefactors, points_per_split = len(self.inspace_points))
     
     @classmethod
     def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None):
@@ -215,6 +215,9 @@ class CombVec(Vec, Generic[V1T, V2T]):
         self.__len = len(v1)
         (self.v1, self.v2) = (v1, v2)
         self.operation = operation
+    
+    def reduce_gram(self, gram, axis = 0):
+        return gram
 
     def inner(self, Y:"CombVec[V1T, V2T]"=None, full=True):
         if Y is None:

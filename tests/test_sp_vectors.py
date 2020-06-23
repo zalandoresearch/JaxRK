@@ -35,7 +35,7 @@ def test_SpVec(kernel, idx_kernel):
 
     # one process observed
     fvec = SpVec(kernel, y1[:2, None], np.cumsum(np.array([2])), None, use_subtrajectories=False)
-    gram = fvec.k_obs(fvec.inspace_points)
+    gram = fvec.k(fvec.inspace_points)
     assert len(fvec) == 1
     #when summing: assert np.allclose(fvec.inner(), gram.sum(keepdims=True))
     assert np.allclose(fvec.inner(), gram.mean(keepdims=True))

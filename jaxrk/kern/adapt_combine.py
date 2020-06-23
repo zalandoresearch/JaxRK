@@ -4,7 +4,6 @@ from typing import Callable
 import jax.numpy as np
 import jax.scipy as sp
 import jax.scipy.stats as stats
-from jax.experimental.vectorize import vectorize
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
@@ -47,16 +46,6 @@ class SplitDimsKernel(Kernel):
             split_Y = [Y[:, self.intervals[i]:self.intervals[i + 1]] for i in range(len(self.kernels))]
         sub_grams = np.array([self.kernels[i].gram(split_X[i], split_Y[i], diag = diag) * self.weights[i]  for i in range(len(self.kernels))])
         return self.op(sub_grams)
-
-def test_SplitDimsKernel():
-    (intervals, kernels) = ([0, 2, 5], [GaussianKernel(0.1), GaussianKernel(1)])
-    X = np.arange(15).reshape((3,5))
-    Y = (X + 3)[:-1,:]
-    for op in "+", "*":
-        k = SplitDimsKernel(intervals, kernels, op)
-        assert(k.gram(X, Y).shape == (len(X), len(Y)))
-        assert(k.gram(X).shape == (len(X), len(X)))
-        assert(k.gram(X, diag = True).shape == (len(X),))
                 
 
 class SKlKernel(Kernel):

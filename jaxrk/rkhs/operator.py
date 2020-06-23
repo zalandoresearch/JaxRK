@@ -53,21 +53,75 @@ class CovOp(FiniteOp[InpVecT, InpVecT]):
     def from_Samples(cls, kern, inspace_points, prefactors = None, regul = 0.01):
         return cls(FiniteVec(kern, inspace_points, prefactors), regul = regul)
     
+    @classmethod
+    def regul(cls, nsamps:int, nrefsamps:int = None, a:float = 0.49999999999999, b:float = 0.49999999999999, c:float = 0.1):
+        """Compute the regularizer based on the formula from the Kernel Conditional Density operators paper(Corollary 3.4, 2020).
+        
+        smaller c => larger bias, tighter stochastic error bounds
+        bigger  c =>  small bias, looser stochastic error bounds
 
-    def inv(self):
+        Args:
+            nsamps (int): Number of samples used for computing the RKHS embedding.
+            nrefsamps (int, optional): Number of samples used for computing the reference distribution covariance operator. Defaults to nsamps.
+            a (float, optional): Parameter a. Assume a > 0 and a < 0.5, defaults to 0.49999999999999.
+            b (float, optional): Parameter b. Assume a > 0 and a < 0.5, defaults to 0.49999999999999.
+            c (float, optional): Bias/variance tradeoff parameter. Assume c > 0 and c < 1, defaults to 0.1.
+
+        Returns:
+            [type]: [description]
+        """
+        if nrefsamps is None:
+            nrefsamps = nsamps
+            
+        assert(a > 0 and a < 0.5)
+        assert(b > 0 and b < 0.5)
+        assert(c > 0 and c < 1)
+        assert(nsamps > 0 and nrefsamps > 0)
+        
+        return max(nrefsamps**(-b*c), nsamps**(-2*a*c))
+
+    def inv(self, regul:float = None) -> "CovOp[InpVecT, InpVecT]":
+        """Compute the inverse of this covariance operator with a certain regularization.
+
+        Args:
+            regul (float, optional): Regularization parameter to be used. Defaults to self.regul.
+
+        Returns:
+            CovOp[InpVecT, InpVecT]: The inverse operator
+        """
+        set_inv = False
+        if regul is None:
+            set_inv = True
+            regul = self.regul
+
         if self._inv is None:
-            inv_gram = np.linalg.inv(inner(self.inp_feat) + self.regul * np.eye(len(self.inp_feat), dtype = self.matr.dtype))
-            matr = (self.matr**2 @ inv_gram @ inv_gram)
-            self._inv = CovOp(self.inp_feat, self.regul)
-            self._inv.matr = matr
-            self._inv._inv = self
-        return self._inv
+            inv_gram = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(self.inp_feat), dtype = self.matr.dtype))
+            matr = (self.matr @ self.matr @ inv_gram @ inv_gram)
+            rval = CovOp(self.inp_feat, regul)
+            rval.matr = matr
+            rval._inv = self
+        if set_inv:
+            self._inv = rval
+        return rval
+    
+    def solve(self, embedding:InpVecT):
+        """Solve the inverse problem to find
+        μ_P = C_ρ dP/dρ
+        where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `embedding`.
+
+        Args:
+            embedding (InpVecT): The embedding of the distribution of interest.
+        """
+        regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
+        C_inv =  self.inv(regul)
+        return multiply(C_inv, embedding).normalized()
+
         
 
 class Cmo(FiniteOp[InpVecT, OutVecT]):
     """conditional mean operator
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01):
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         regul = np.array(regul, dtype=np.float32)

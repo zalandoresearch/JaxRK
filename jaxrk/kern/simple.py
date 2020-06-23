@@ -4,7 +4,6 @@ from typing import Callable
 import jax.numpy as np
 import jax.scipy as sp
 import jax.scipy.stats as stats
-from jax.experimental.vectorize import vectorize
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
