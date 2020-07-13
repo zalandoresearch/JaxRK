@@ -132,18 +132,27 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
             self._inv = rval
         return rval
     
-    def solve(self, embedding:InpVecT):
-        """Solve the inverse problem to find dP/dρ from equation
+    def solve(self, inp:CombT) -> RkhsObject:
+        """If `inp` is an RKHS vector of length 1 (a mean embedding): Solve the inverse problem to find dP/dρ from equation
         μ_P = C_ρ dP/dρ
-        where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `embedding`.
-
+        where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `inp`.
+        If `inp` is a `FiniteMap`: Solve the inverse problem to find operator B from equation
+        A = C_ρ B
+        where C_ρ is the covariance operator represented by this object (`self`), and A is given by `inp`.
+        
         Args:
-            embedding (InpVecT): The embedding of the distribution of interest.
+            inp (InpVecT): The embedding of the distribution of interest, or the map of interest.
         """
-        #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
-        regul = CovOp.regul(len(embedding), 1./np.mean(np.diag(self.matr)))
+        
+        if isinstance(inp, FiniteMap):
+            regul = CovOp.regul(len(inp.outp_feat), 1./np.mean(np.diag(self.matr)))
+        else:
+            assert(len(inp) == 1)
+            #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
+            regul = CovOp.regul(len(inp), 1./np.mean(np.diag(self.matr)))
+        
         C_inv =  self.inv(regul)
-        return apply(C_inv, embedding)
+        return apply(C_inv, inp)
 
         
 

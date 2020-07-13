@@ -89,15 +89,15 @@ def test_CovOp(plot = False):
     inv_Gram_ref = np.linalg.inv(inner(ref_fvec))
 
     C_samps = CovOp(out_fvec, regul=regul_C_ref)
-    unif_obj = C_samps.solve(out_meanemb)
+    unif_obj = C_samps.solve(out_meanemb).unsigned_projection().normalized()
     C_ref = CovOp(ref_fvec, regul=regul_C_ref)
-    dens_obj = C_ref.solve(out_meanemb)
+    dens_obj = C_ref.solve(out_meanemb).unsigned_projection().normalized()
     
 
 
     targp = np.exp(targ.logpdf(ref_fvec.inspace_points.squeeze())).squeeze()
     estp = np.squeeze(inner(dens_obj, ref_fvec))
-    estp2 = np.squeeze(inner(dens_obj.unsigned_projection().normalized(), ref_fvec))
+    estp2 = np.squeeze(inner(dens_obj, ref_fvec))
     est_sup = unif_obj(x).squeeze()
     assert (np.abs(targp.squeeze()-estp).mean() < 0.8), "Estimated density strongly deviates from true density"
     if plot:
@@ -175,7 +175,7 @@ def test_Cdmo(plot = False):
 
 
 def test_Cdo_timeseries(plot = False):
-    raise NotImplementedException
+    raise NotImplementedError()
     if plot:
         import pylab as pl
     x = np.linspace(0, 40, 400).reshape((-1, 1))
