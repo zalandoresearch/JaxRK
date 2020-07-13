@@ -21,7 +21,10 @@ class Vec(RkhsObject, Sized):
 InpVecT = TypeVar("InpVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
 
-class Op(RkhsObject, Generic[InpVecT, OutVecT]):    
+
+class Map(RkhsObject, Generic[InpVecT, OutVecT]):
+    """A vectorized map from InpVecT vectors to OutVecT vectors.
+    """
     @abstractmethod
     def __len__(self):
         pass

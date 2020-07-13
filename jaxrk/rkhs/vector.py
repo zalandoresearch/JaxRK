@@ -12,7 +12,7 @@ from jax.scipy.special import logsumexp
 
 from typing import Generic, TypeVar
 
-from .base import Vec, Op, RkhsObject
+from .base import Vec, Map, RkhsObject
 
 def __casted_output(function):
     return lambda x: onp.asarray(function(x), dtype=np.float64)

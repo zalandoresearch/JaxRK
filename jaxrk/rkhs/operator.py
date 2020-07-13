@@ -3,28 +3,56 @@ import jax.numpy as np
 from typing import TypeVar,  Generic
 from jaxrk.rkhs.vector import FiniteVec, inner
 
-from .base import Op, Vec, RkhsObject
+from .base import Map, Vec, RkhsObject
 from scipy.optimize import minimize
 
-#VecSubType = NewType("VecSubType", Vec)
+
 InpVecT = TypeVar("InpVecT", bound=Vec)
-IntermVecT = TypeVar("IntermVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
 
+#The following is input to a map RhInpVectT -> InpVecT
+RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
+
+CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT)
 
 
-class FiniteOp(Op[InpVecT, OutVecT]):
-    """Finite rank RKHS operator
+class FiniteMap(Map[InpVecT, OutVecT]):
+    """Finite rank affine map in RKHS
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False):
         self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         self.matr = matr
+        self.mean_center_inp = mean_center_inp
+        if self.mean_center_inp:
+            G_inp = inner(inp_feat, inp_feat)
+            # compute the centering term that is constant wrt input
+            self.const_cent_term = np.mean(G_inp, 1, keepdims = True)
+            self.const_cent_term = np.mean(self.const_cent_term) - self.const_cent_term
+
     
     def __len__(self):
         return len(self.inp_feat)
+
+    def _corrected_gram(self, input:InpVecT):
+        inp_gram = inner(self.inp_feat, input)
+        if self.mean_center_inp:
+            cent_term = self.const_cent_term - np.mean(inp_gram, 0)
+            inp_gram = inp_gram + cent_term
+        return inp_gram
+
+    def apply(self, inp:CombT) -> RkhsObject:
+        if isinstance(inp, FiniteMap):
+            return FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr)
+        else:
+            if len(inp) == 1:
+                return FiniteVec.construct_RKHS_Elem(self.outp_feat.k, self.outp_feat.inspace_points, np.squeeze(self.matr @ self._corrected_gram(inp)))
+            else:
+                pref = self.matr @ self._corrected_gram(inp)
+                return FiniteVec(self.outp_feat.k, np.tile(self.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
+
     
-    def solve(self, result:FiniteVec):
+    def solve(self, result:OutVecT):
         if np.all(self.outp_feat.inspace_points == result.inspace_points):
             s = np.linalg.solve(self.matr @ inner(self.inp_feat, self.inp_feat), result.prefactors)
             return FiniteVec.construct_RKHS_Elem(result.k, result.inspace_points, s)
@@ -33,19 +61,19 @@ class FiniteOp(Op[InpVecT, OutVecT]):
 
 
 
-class CrossCovOp(FiniteOp[InpVecT, OutVecT]):
+class CrossCovOp(FiniteMap[InpVecT, OutVecT]):
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
+        super().__init__(inp_feat, outp_feat, np.diag((inp_feat.prefactors + outp_feat.prefactors)/2))
         assert len(inp_feat) == len(outp_feat)
         assert np.allclose(inp_feat.prefactors, outp_feat.prefactors)
-        self.inp_feat = inp_feat
-        self.outp_feat = outp_feat
-        self.matr = np.diag((inp_feat.prefactors + outp_feat.prefactors)/2)
         self.regul = regul
 
-class CovOp(FiniteOp[InpVecT, InpVecT]):
+class CovOp(FiniteMap[InpVecT, InpVecT]):
     def __init__(self, inp_feat:InpVecT, regul = 0.01):
-        self.inp_feat = self.outp_feat = self.inp_feat = inp_feat.updated(np.ones(len(inp_feat),dtype = inp_feat.prefactors.dtype))
-        self.matr = np.diag(inp_feat.prefactors)
+        super().__init__(inp_feat,
+                         inp_feat.updated(np.ones(len(inp_feat),dtype = inp_feat.prefactors.dtype)),
+                         np.diag(inp_feat.prefactors))
+        self.inp_feat = self.outp_feat
         self._inv = None
         self.regul = regul
     
@@ -105,57 +133,52 @@ class CovOp(FiniteOp[InpVecT, InpVecT]):
         return rval
     
     def solve(self, embedding:InpVecT):
-        """Solve the inverse problem to find
+        """Solve the inverse problem to find dP/dρ from equation
         μ_P = C_ρ dP/dρ
         where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `embedding`.
 
         Args:
             embedding (InpVecT): The embedding of the distribution of interest.
         """
-        regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
+        #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
+        regul = CovOp.regul(len(embedding), 1./np.mean(np.diag(self.matr)))
         C_inv =  self.inv(regul)
-        return multiply(C_inv, embedding).normalized()
+        return apply(C_inv, embedding)
 
         
 
-class Cmo(FiniteOp[InpVecT, OutVecT]):
+class Cmo(FiniteMap[InpVecT, OutVecT]):
     """conditional mean operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01):
-        self.inp_feat = inp_feat
-        self.outp_feat = outp_feat
         regul = np.array(regul, dtype=np.float32)
         if False:
-            op = multiply(CrossCovOp(inp_feat, outp_feat), CovOp(inp_feat, regul).inv())
-            (self.inp_feat, self.outp_feat, self.matr) = (op.inp_feat,
-                                                          op.outp_feat,
-                                                          op.matr)
+            op = apply(CrossCovOp(inp_feat, outp_feat), CovOp(inp_feat, regul).inv())
+            matr = op.matr
         else:
-            self.matr = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(inp_feat)))
+            matr = np.linalg.inv(inner(inp_feat) + regul * np.eye(len(inp_feat)))
+        super().__init__(inp_feat, outp_feat, matr)
 
-class Cdo(FiniteOp[InpVecT, OutVecT]):
+class Cdo(FiniteMap[InpVecT, OutVecT]):
     """conditional density operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01):
         
         if True:
-            op = multiply(CovOp(ref_feat, regul).inv(), Cmo(inp_feat, outp_feat, regul))
-            (self.inp_feat, self.outp_feat, self.matr) = (op.inp_feat,
-                                                          op.outp_feat,
-                                                          op.matr)
+            op = apply(CovOp(ref_feat, regul).inv(), Cmo(inp_feat, outp_feat, regul))
+            matr = op.matr
         else:
-            self.inp_feat = inp_feat
-            self.outp_feat = ref_feat
             cmo_matr = np.linalg.inv(inner(self.inp_feat) + regul * tf.eye(len(inp_feat)))
             assert np.allclose(cmo_matr, Cmo(inp_feat, outp_feat, regul).matr)
 
             inv_gram = np.linalg.inv(inner(ref_feat) + regul * np.eye(len(ref_feat), dtype = ref_feat.prefactors.dtype))
             preimg_factor = (np.diag(ref_feat.prefactors**2) @ inv_gram @ inv_gram)
             #assert np.allclose(preimg_factor, CovOp(ref_feat, regul).inv().matr)
-            self.matr =  preimg_factor @ inner(ref_feat, outp_feat) @ cmo_matr
+            matr =  preimg_factor @ inner(ref_feat, outp_feat) @ cmo_matr
+        super().__init__(inp_feat, ref_feat, matr)
 
 
-class HsTo(FiniteOp[InpVecT, InpVecT]): 
+class HsTo(FiniteMap[InpVecT, InpVecT]): 
     """RKHS transfer operators
     """
     def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = False, koopman = False):
@@ -167,28 +190,22 @@ class HsTo(FiniteOp[InpVecT, InpVecT]):
         else:
             G_xy = inner(start_feat, timelagged_feat)
             G_x = inner(start_feat)
-            self.matr = (np.linalg.pinv(G_xy)
+            matr = (np.linalg.pinv(G_xy)
                          @ np.linalg.pinv(G_x+ len(timelagged_feat) * regul * np.eye(len(timelagged_feat))) 
                          @ G_xy)
             if koopman is True:
-                self.matr = self.matr.T
+                matr = self.matr.T
 
         if koopman is False:
-            self.inp_feat = start_feat
-            self.outp_feat = timelagged_feat
+            inp_feat = start_feat
+            outp_feat = timelagged_feat
         else:
-            self.inp_feat = timelagged_feat
-            self.outp_feat = start_feat
+            inp_feat = timelagged_feat
+            outp_feat = start_feat
+        super().__init__(inp_feat, outp_feat, matr)
 
 
-CombT = TypeVar("CombT", FiniteOp[InpVecT, IntermVecT], IntermVecT)
 
-def multiply(A:FiniteOp[IntermVecT, OutVecT], B:CombT) -> RkhsObject: # "T = TypeVar("T"); multiply(A:FiniteOp, B:T) -> T"
-    if isinstance(B, FiniteOp):
-        return FiniteOp(B.inp_feat, A.outp_feat, A.matr @ inner(A.inp_feat, B.outp_feat) @ B.matr)
-    else:
-        if len(B) == 1:
-            return FiniteVec.construct_RKHS_Elem(A.outp_feat.k, A.outp_feat.inspace_points, np.squeeze(A.matr @ inner(A.inp_feat, B)))
-        else:
-            pref = A.matr @ inner(A.inp_feat, B)
-            return FiniteVec(A.outp_feat.k, np.tile(A.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
+
+def apply(A:FiniteMap[InpVecT, OutVecT], inp:CombT) -> RkhsObject:
+    return A.apply(inp)

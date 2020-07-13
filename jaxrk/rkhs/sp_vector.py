@@ -1,10 +1,10 @@
 import jax.numpy as np
 from jax import jit, vmap, lax
 
-from .base import Vec, Op, RkhsObject
+from .base import Vec, Map, RkhsObject
 
 from jaxrk.rkhs.vector import FiniteVec
-from jaxrk.rkhs.operator import Cmo, multiply
+from jaxrk.rkhs.operator import Cmo, apply
 
 class SpVec(Vec):
     # FIXME: Reference index enters Kernel regression as input; with shift-invariant kernel we get dependence on reference index
