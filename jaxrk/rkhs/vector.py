@@ -1,18 +1,21 @@
-import numpy as onp, scipy as osp
-import jax.numpy as np
-
-from numpy.random import rand
+from copy import copy
+from time import time
+from typing import Generic, TypeVar
 
 import jax
-from time import time
+import jax.numpy as np
+import numpy as onp
+import scipy as osp
 from jax import grad
 from jax.numpy import dot, log
 from jax.scipy.special import logsumexp
+from numpy.random import rand
+
+from .base import Map, RkhsObject, Vec
+
 #from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
 
-from typing import Generic, TypeVar
 
-from .base import Vec, Map, RkhsObject
 
 def __casted_output(function):
     return lambda x: onp.asarray(function(x), dtype=np.float64)
@@ -22,7 +25,7 @@ class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
-    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None):
+    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None, center = False):
         row_splits = None
         self.k = kern
         self.inspace_points = inspace_points
@@ -36,9 +39,10 @@ class FiniteVec(Vec):
         assert(prefactors.shape[0] == len(inspace_points))
         assert(len(prefactors.shape) == 1)
         self.prngkey = jax.random.PRNGKey(np.int64(time()))
-        self.__reconstruction_kwargs = {}
+        self.__reconstruction_kwargs = {"center" : center}
 
         self.prefactors = prefactors
+        self.center = center
 
 
         if (points_per_split is not None) or (row_splits is not None):
@@ -133,10 +137,19 @@ class FiniteVec(Vec):
     def updated(self, prefactors):
         assert(len(self.prefactors) == len(prefactors))
         return FiniteVec(self.k, self.inspace_points, prefactors, **self.__reconstruction_kwargs)
+    
+    def centered(self):
+        kwargs = copy(self.__reconstruction_kwargs)
+        kwargs["center"] = True
+
+        return FiniteVec(self.k, self.inspace_points, self.prefactors, **kwargs)
 
     def reduce_gram(self, gram, axis = 0):
         gram = gram.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
-        return self.__reduce_gram__(gram, axis)
+        gram = self.__reduce_gram__(gram, axis)
+        if self.center:
+            gram = gram - np.mean(gram, axis, keepdims = True)
+        return gram
     
     def get_mean_var(self, keepdims = False):
         mean = self.reduce_gram(self.inspace_points, 0)
@@ -182,7 +195,7 @@ class FiniteVec(Vec):
         else:
             assert False, "Frank-Wolfe needs attention."
             #the problem are circular imports.
-            
+
             #return frank_wolfe_pos_proj(self, self.updated(pos_proj(self.inspace_points, self.prefactors, self.k)), nsamps - self.inspace_points.shape[0])
 
     
@@ -246,4 +259,3 @@ class CombVec(Vec, Generic[V1T, V2T]):
 
 def inner(X, Y=None, full=True):
     return X.inner(Y, full)
-
