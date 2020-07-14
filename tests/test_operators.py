@@ -89,9 +89,9 @@ def test_CovOp(plot = False):
     inv_Gram_ref = np.linalg.inv(inner(ref_fvec))
 
     C_samps = CovOp(out_fvec, regul=regul_C_ref)
-    unif_obj = C_samps.solve(out_meanemb).unsigned_projection().normalized()
+    unif_obj = C_samps.solve(out_meanemb).pos_proj().normalized()
     C_ref = CovOp(ref_fvec, regul=regul_C_ref)
-    dens_obj = C_ref.solve(out_meanemb).unsigned_projection().normalized()
+    dens_obj = C_ref.solve(out_meanemb).pos_proj().normalized()
     
 
 
@@ -143,16 +143,16 @@ def test_Cdmo(plot = False):
     cd = Cdo(invec, outvec, refervec, 0.1)
     cm =  Cmo(invec, outvec, 0.1)
     (true_x1, est_x1, este_x1, true_x2, est_x2, este_x2) = [lambda samps: true_dens(np.hstack([np.repeat(x1, len(samps), 0), samps])),
-                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(),
-                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(),
+                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(),
+                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(),
                                                             lambda samps: true_dens(np.hstack([np.repeat(x2, len(samps), 0), samps])),
-                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(),
-                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(), ]
-                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(),
+                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), ]
+                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
                                                             # lambda samps: true_dens(np.hstack([np.repeat(x2, len(samps), 0), samps])),
-                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
+                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
 
     t = np.array((true_x1(refervec.inspace_points), true_x2(refervec.inspace_points)))
     e = np.array((np.squeeze(est_x1(refervec.inspace_points)), np.squeeze(est_x2(refervec.inspace_points))))
@@ -209,11 +209,11 @@ def test_Cdo_timeseries(plot = False):
     print(sol)
     return sol2.T[0], sol[0][200:], y[200:]
     (true_x1, est_x1, este_x1, true_x2, est_x2, este_x2) = [lambda samps: true_dens(np.hstack([np.repeat(x1, len(samps), 0), samps])),
-                                                            lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
                                                             lambda samps: true_dens(np.hstack([np.repeat(x2, len(samps), 0), samps])),
-                                                            lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().unsigned_projection().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
+                                                            lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
+                                                            lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
 
     t = np.array((true_x1(refervec.inspace_points), true_x2(refervec.inspace_points)))
     e = np.array((est_x1(refervec.inspace_points), est_x2(refervec.inspace_points)))

@@ -8,11 +8,11 @@ from numpy.random import randint
 
 import numpy as onp
 
-__all__ = ["frank_wolfe_unsigned_projection"]
+__all__ = ["frank_wolfe_pos_proj"]
 def __casted_output(function):
     return lambda x: onp.asarray(function(x), dtype=np.float64)
 
-def frank_wolfe_unsigned_projection(element:FiniteVec, solution:FiniteVec = None, num_samples:np.int32 = 100):
+def frank_wolfe_pos_proj(element:FiniteVec, solution:FiniteVec = None, num_samples:np.int32 = 100):
     assert(len(element) == 1)
     #key = PRNGKey(np.int32(time()))
     if solution is None:

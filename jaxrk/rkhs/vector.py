@@ -8,7 +8,7 @@ from time import time
 from jax import grad
 from jax.numpy import dot, log
 from jax.scipy.special import logsumexp
-#from jaxrk.utilities.frank_wolfe import frank_wolfe_unsigned_projection
+#from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
 
 from typing import Generic, TypeVar
 
@@ -161,25 +161,36 @@ class FiniteVec(Vec):
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     def point_representant(self, sample = False):
-        n = self.unsigned_projection().normalized()
+        n = self.pos_proj().normalized()
         if not sample:
             return n.inspace_points[np.argmax(n.prefactors.flatten()), :]
         else:
             return n.inspace_points[jax.random.categorical(self.prngkey, log(n.prefactors.flatten())), :]
     
-    def unsigned_projection(self, nsamps = None):
+    def pos_proj(self, nsamps:int = None) -> "FiniteVec":
+        """Project to RKHS element with purely positive prefactors. Assumes `len(self) == 1`.
+
+        Args:
+            nsamps (int, optional): Number of input space points. Defaults to None, in which case the input space points of self are reused.
+
+        Returns:
+            FiniteVec: The result of the projection.
+        """
         assert(len(self) == 1)
         if nsamps is None:
-            return self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k))
+            return self.updated(pos_proj(self.inspace_points, self.prefactors, self.k))
         else:
-            return frank_wolfe_unsigned_projection(self, self.updated(unsigned_projection(self.inspace_points, self.prefactors, self.k)), nsamps - self.inspace_points.shape[0])
+            assert False, "Frank-Wolfe needs attention."
+            #the problem are circular imports.
+            
+            #return frank_wolfe_pos_proj(self, self.updated(pos_proj(self.inspace_points, self.prefactors, self.k)), nsamps - self.inspace_points.shape[0])
 
     
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
 
 
-def unsigned_projection(support_points, factors, kernel):
+def pos_proj(support_points, factors, kernel):
     G = kernel(support_points).astype(np.float64)
     c = 2*np.dot(factors, G)
     cost = lambda f: dot(dot(f, G), f) - dot(c, f)
