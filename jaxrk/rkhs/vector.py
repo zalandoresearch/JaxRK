@@ -198,6 +198,13 @@ class FiniteVec(Vec):
 
             #return frank_wolfe_pos_proj(self, self.updated(pos_proj(self.inspace_points, self.prefactors, self.k)), nsamps - self.inspace_points.shape[0])
 
+    def dens_proj(self, nsamps:int = None) -> "FiniteVec":
+        """Project to an RKHS object that is also a density in the usual sense. In particular, a projection to positive prefactors and then normalization so prefactors sum to 1.
+
+        Returns:
+            FiniteVec: The result of the projection
+        """
+        return self.normalized().pos_proj(nsamps).normalized()
     
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))

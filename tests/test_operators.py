@@ -21,7 +21,7 @@ kernel_setups = [
 ]
 
 
-def test_multiply():
+def test_apply():
     x = np.linspace(-2.5, 15, 5)[:, np.newaxis].astype(np.float32)
     y = randn(x.size)[:, np.newaxis].astype(np.float32)
     
@@ -62,7 +62,7 @@ def test_FiniteMap():
     assert np.allclose(apply(C3, C1).matr, gk_x(rv_fvec.inspace_points, ref_fvec.inspace_points) @ C1.matr, 0.001, 0.001)
 
 
-def test_CovOp(plot = False):   
+def test_CovOp(plot = False, center = False):   
     from scipy.stats import multivariate_normal
 
     nsamps = 1000
@@ -76,21 +76,21 @@ def test_CovOp(plot = False):
 
     targ = mixt(D, [multivariate_normal(3*np.ones(D), np.eye(D)*0.7**2), multivariate_normal(7*np.ones(D), np.eye(D)*1.5**2)], [0.5, 0.5])
     out_samps = targ.rvs(nsamps).reshape([nsamps, 1]).astype(float)
-    out_fvec = FiniteVec(gk_x, out_samps, np.ones(nsamps))
+    out_fvec = FiniteVec(gk_x, out_samps, np.ones(nsamps), center = center)
     out_meanemb = out_fvec.sum()
     
 
     x = np.linspace(-2.5, 15, samps_unif)[:, np.newaxis].astype(float)
-    ref_fvec = FiniteVec(gk_x, x, np.ones(len(x)))
+    ref_fvec = FiniteVec(gk_x, x, np.ones(len(x)), center = center)
     ref_elem = ref_fvec.sum()
 
-    C_ref = CovOp(ref_fvec, regul=0.) # CovOp_compl(out_fvec.k, out_fvec.inspace_points, regul=0.)
+    C_ref = CovOp(ref_fvec, regul=0., center = center) # CovOp_compl(out_fvec.k, out_fvec.inspace_points, regul=0.)
 
     inv_Gram_ref = np.linalg.inv(inner(ref_fvec))
 
-    C_samps = CovOp(out_fvec, regul=regul_C_ref)
+    C_samps = CovOp(out_fvec, regul=regul_C_ref, center = center)
     unif_obj = C_samps.solve(out_meanemb).pos_proj().normalized()
-    C_ref = CovOp(ref_fvec, regul=regul_C_ref)
+    C_ref = CovOp(ref_fvec, regul=regul_C_ref, center = center)
     dens_obj = C_ref.solve(out_meanemb).pos_proj().normalized()
     
 
@@ -134,44 +134,57 @@ def test_Cdmo(plot = False):
         true_dens = lambda samps: exp(location_mixture_logpdf(samps, means, np.ones(nmeans) / nmeans, comp_distribution))
         return rvs, means, true_dens
 
+
     x1 = np.ones((1,1))
     x2 = np.zeros((1,1))
     (rvs, means, true_dens) = generate_donut(50, 10)
-    invec = FiniteVec(GaussianKernel(0.5), rvs[:, :1])
-    outvec = FiniteVec(GaussianKernel(0.5), rvs[:, 1:])
-    refervec = FiniteVec(outvec.k, np.linspace(-4, 4, 5000)[:, None])
-    cd = Cdo(invec, outvec, refervec, 0.1)
-    cm =  Cmo(invec, outvec, 0.1)
-    (true_x1, est_x1, este_x1, true_x2, est_x2, este_x2) = [lambda samps: true_dens(np.hstack([np.repeat(x1, len(samps), 0), samps])),
-                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(),
-                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(),
-                                                            lambda samps: true_dens(np.hstack([np.repeat(x2, len(samps), 0), samps])),
-                                                            apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(),
-                                                            apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), ]
-                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x1)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            # lambda samps: true_dens(np.hstack([np.repeat(x2, len(samps), 0), samps])),
-                                                            # lambda samps: np.squeeze(inner(apply(cd, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
-                                                            # lambda samps: np.squeeze(inner(apply(cm, FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
 
-    t = np.array((true_x1(refervec.inspace_points), true_x2(refervec.inspace_points)))
-    e = np.array((np.squeeze(est_x1(refervec.inspace_points)), np.squeeze(est_x2(refervec.inspace_points))))
+    regul = CovOp.regul(1, len(rvs)) # we will look at 1 point inputs
+
+    invec = FiniteVec(GaussianKernel(0.1), rvs[:, :1])
+    outvec = FiniteVec(GaussianKernel(0.1), rvs[:, 1:])
+    refervec = FiniteVec(outvec.k, np.linspace(-4, 4, 5000)[:, None])
+
+    maps = {"cent" if center else "unc": 
+                {"emb": Cmo(invec, outvec, regul, center = center),
+                 "dens": Cdo(invec, outvec, refervec, regul, center = center)}
+                for center in [True, False]
+            }
+
+    ests = {map_type:
+                    {cent: np.array([maps[cent][map_type](x).dens_proj()(refervec.inspace_points).squeeze()
+                                        for x in [x1, x2]])
+                        for cent in ["cent", "unc"]}
+            for map_type in ["emb", "dens"]}
+
+
+                                             
+    t = np.array([true_dens(np.hstack([np.repeat(x, len(refervec.inspace_points), 0), refervec.inspace_points]))
+                                for x in [x1, x2]])
     if plot:
         import pylab as pl
 
-        (fig, ax) = pl.subplots(1, 3, False, False)
-        ax[0].plot(refervec.inspace_points, t[0])
-        ax[0].plot(refervec.inspace_points, e[0], "--", label = "dens")
-        ax[0].plot(refervec.inspace_points, np.squeeze(este_x1(refervec.inspace_points)), "-.", label = "emb")
-        
-        ax[1].plot(refervec.inspace_points, t[1])
-        ax[1].plot(refervec.inspace_points, e[1], "--", label = "dens")
-        ax[1].plot(refervec.inspace_points, np.squeeze(este_x2(refervec.inspace_points)),"-.", label = "emb")
+        (fig, ax) = pl.subplots(3, 1, False, False)
+
+        for site in range(2):
+            ax[site].plot(refervec.inspace_points, t[site], linewidth=2, color="b", label = "true dens", alpha = 0.5)
+            for map_type in ["emb", "dens"]:
+                for cent in ["cent", "unc"]:
+                    if map_type == "emb":
+                        color = "r"
+                    else:
+                        color = "g"
+                    if cent == "cent":
+                        style = ":"
+                    else:
+                        style= "--"
+                    ax[site].plot(refervec.inspace_points, ests[map_type][cent][site], style, color = color, label = map_type+" "+cent, alpha = 0.5)
 
         ax[2].scatter(*rvs.T)
         fig.legend()
         fig.show()
-    assert(np.allclose(e,t, atol=0.5))
+    for cent in ["unc", "cent"]:
+        assert(np.allclose(ests["dens"][cent],t, atol=0.5))
 
 
 def test_Cdo_timeseries(plot = False):

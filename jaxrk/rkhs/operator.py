@@ -1,11 +1,12 @@
+from typing import Generic, TypeVar, Callable
+
 import jax.numpy as np
-
-from typing import TypeVar,  Generic
-from jaxrk.rkhs.vector import FiniteVec, inner
-
-from .base import Map, Vec, RkhsObject
+from jax.interpreters.xla import DeviceArray
 from scipy.optimize import minimize
 
+from jaxrk.rkhs.vector import FiniteVec, inner
+
+from .base import Map, RkhsObject, Vec
 
 InpVecT = TypeVar("InpVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
@@ -13,7 +14,7 @@ OutVecT = TypeVar("OutVecT", bound=Vec)
 #The following is input to a map RhInpVectT -> InpVecT
 RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
 
-CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT)
+CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT, np.array)
 
 
 class FiniteMap(Map[InpVecT, OutVecT]):
@@ -25,10 +26,9 @@ class FiniteMap(Map[InpVecT, OutVecT]):
         self.matr = matr
         self.mean_center_inp = mean_center_inp
         if self.mean_center_inp:
-            G_inp = inner(inp_feat, inp_feat)
             # compute the centering term that is constant wrt input
-            self.const_cent_term = np.mean(G_inp, 1, keepdims = True)
-            self.const_cent_term = np.mean(self.const_cent_term) - self.const_cent_term
+            evaluated_mean_emb = np.mean(inner(inp_feat, inp_feat), 1, keepdims = True)
+            self.const_cent_term = np.mean(evaluated_mean_emb) - evaluated_mean_emb
 
     
     def __len__(self):
@@ -37,27 +37,28 @@ class FiniteMap(Map[InpVecT, OutVecT]):
     def _corrected_gram(self, input:InpVecT):
         inp_gram = inner(self.inp_feat, input)
         if self.mean_center_inp:
-            cent_term = self.const_cent_term - np.mean(inp_gram, 0)
-            inp_gram = inp_gram + cent_term
+            inp_gram = (inp_gram 
+                        + self.const_cent_term
+                        - np.mean(inp_gram, 0, keepdims = True))
         return inp_gram
 
     def apply(self, inp:CombT) -> RkhsObject:
         if isinstance(inp, FiniteMap):
-            return FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr)
+            return FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr, mean_center_inp = inp.mean_center_inp)
         else:
+            if isinstance(inp, DeviceArray):
+                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
             if len(inp) == 1:
                 return FiniteVec.construct_RKHS_Elem(self.outp_feat.k, self.outp_feat.inspace_points, np.squeeze(self.matr @ self._corrected_gram(inp)))
             else:
                 pref = self.matr @ self._corrected_gram(inp)
                 return FiniteVec(self.outp_feat.k, np.tile(self.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
 
+    def __call__(self, inp:CombT) -> RkhsObject:
+        return self.apply(inp)
     
     def solve(self, result:OutVecT):
-        if np.all(self.outp_feat.inspace_points == result.inspace_points):
-            s = np.linalg.solve(self.matr @ inner(self.inp_feat, self.inp_feat), result.prefactors)
-            return FiniteVec.construct_RKHS_Elem(result.k, result.inspace_points, s)
-        else:
-            assert()
+        raise NotImplementedError()
 
 
 
@@ -69,10 +70,12 @@ class CrossCovOp(FiniteMap[InpVecT, OutVecT]):
         self.regul = regul
 
 class CovOp(FiniteMap[InpVecT, InpVecT]):
-    def __init__(self, inp_feat:InpVecT, regul = 0.01):
+    def __init__(self, inp_feat:InpVecT, regul = 0.01,center = False):
         super().__init__(inp_feat,
-                         inp_feat.updated(np.ones(len(inp_feat),dtype = inp_feat.prefactors.dtype)),
-                         np.diag(inp_feat.prefactors))
+                         inp_feat.updated(np.ones(len(inp_feat),
+                         dtype = inp_feat.prefactors.dtype)),
+                         np.diag(inp_feat.prefactors),
+                         mean_center_inp=center)
         self.inp_feat = self.outp_feat
         self._inv = None
         self.regul = regul
@@ -147,6 +150,8 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
         if isinstance(inp, FiniteMap):
             regul = CovOp.regul(len(inp.outp_feat), 1./np.mean(np.diag(self.matr)))
         else:
+            if isinstance(inp, DeviceArray):
+                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
             assert(len(inp) == 1)
             #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
             regul = CovOp.regul(len(inp), 1./np.mean(np.diag(self.matr)))
@@ -159,32 +164,22 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
 class Cmo(FiniteMap[InpVecT, OutVecT]):
     """conditional mean operator
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, center = False):
         regul = np.array(regul, dtype=np.float32)
-        if False:
-            op = apply(CrossCovOp(inp_feat, outp_feat), CovOp(inp_feat, regul).inv())
-            matr = op.matr
-        else:
-            matr = np.linalg.inv(inner(inp_feat) + regul * np.eye(len(inp_feat)))
-        super().__init__(inp_feat, outp_feat, matr)
+
+        #we do not center the output features - this still leads to the correct results in the output of the CME
+        c_inp_feat = inp_feat.centered() if center else inp_feat            
+        matr = np.linalg.inv(inner(c_inp_feat) + regul * np.eye(len(inp_feat)))
+        super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center)
 
 class Cdo(FiniteMap[InpVecT, OutVecT]):
     """conditional density operator
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01):
-        
-        if True:
-            op = apply(CovOp(ref_feat, regul).inv(), Cmo(inp_feat, outp_feat, regul))
-            matr = op.matr
-        else:
-            cmo_matr = np.linalg.inv(inner(self.inp_feat) + regul * tf.eye(len(inp_feat)))
-            assert np.allclose(cmo_matr, Cmo(inp_feat, outp_feat, regul).matr)
-
-            inv_gram = np.linalg.inv(inner(ref_feat) + regul * np.eye(len(ref_feat), dtype = ref_feat.prefactors.dtype))
-            preimg_factor = (np.diag(ref_feat.prefactors**2) @ inv_gram @ inv_gram)
-            #assert np.allclose(preimg_factor, CovOp(ref_feat, regul).inv().matr)
-            matr =  preimg_factor @ inner(ref_feat, outp_feat) @ cmo_matr
-        super().__init__(inp_feat, ref_feat, matr)
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
+        super().__init__(inp_feat,
+                         ref_feat,
+                         CovOp(ref_feat, regul).solve(Cmo(inp_feat, outp_feat, regul, center = center)).matr,
+                         mean_center_inp = center)
 
 
 class HsTo(FiniteMap[InpVecT, InpVecT]): 
