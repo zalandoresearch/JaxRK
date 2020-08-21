@@ -21,30 +21,29 @@ class FiniteMap(Map[InpVecT, OutVecT]):
     """Finite rank affine map in RKHS
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False):
-        self.inp_feat = inp_feat
         self.outp_feat = outp_feat
         self.matr = matr
         self.mean_center_inp = mean_center_inp
         if self.mean_center_inp:
-            # compute the centering term that is constant wrt input
-            evaluated_mean_emb = np.mean(inner(inp_feat, inp_feat), 1, keepdims = True)
-            self.const_cent_term = np.mean(evaluated_mean_emb) - evaluated_mean_emb
+            self.inp_feat = inp_feat.centered() 
+            self.const_cent_term = - inner(self.inp_feat, inp_feat.sum())
+        else:
+            self.inp_feat = inp_feat
+            self.const_cent_term = 0.
 
     
     def __len__(self):
         return len(self.inp_feat)
 
     def _corrected_gram(self, input:InpVecT):
-        inp_gram = inner(self.inp_feat, input)
-        if self.mean_center_inp:
-            inp_gram = (inp_gram 
-                        + self.const_cent_term
-                        - np.mean(inp_gram, 0, keepdims = True))
+        inp_gram = inner(self.inp_feat, input) + self.const_cent_term
         return inp_gram
 
-    def apply(self, inp:CombT) -> RkhsObject:
+    def __matmul__(self, inp:CombT) -> RkhsObject:
         if isinstance(inp, FiniteMap):
-            return FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr, mean_center_inp = inp.mean_center_inp)
+            rval = FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr, mean_center_inp = inp.mean_center_inp)
+            rval.const_cent_term = inp.const_cent_term
+            return rval
         else:
             if isinstance(inp, DeviceArray):
                 inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
@@ -54,10 +53,13 @@ class FiniteMap(Map[InpVecT, OutVecT]):
                 pref = self.matr @ self._corrected_gram(inp)
                 return FiniteVec(self.outp_feat.k, np.tile(self.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
 
-    def __call__(self, inp:CombT) -> RkhsObject:
-        return self.apply(inp)
+    def __call__(self, inp:DeviceArray) -> RkhsObject:
+        return self @ FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
     
-    def solve(self, result:OutVecT):
+    def apply(self, inp:CombT) -> RkhsObject:
+        return self @ inp
+    
+    def solve(self, result:OutVecT) -> RkhsObject:
         raise NotImplementedError()
 
 
@@ -156,8 +158,7 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
             #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
             regul = CovOp.regul(len(inp), 1./np.mean(np.diag(self.matr)))
         
-        C_inv =  self.inv(regul)
-        return apply(C_inv, inp)
+        return self.inv(regul) @ inp
 
         
 
@@ -207,9 +208,3 @@ class HsTo(FiniteMap[InpVecT, InpVecT]):
             inp_feat = timelagged_feat
             outp_feat = start_feat
         super().__init__(inp_feat, outp_feat, matr)
-
-
-
-
-def apply(A:FiniteMap[InpVecT, OutVecT], inp:CombT) -> RkhsObject:
-    return A.apply(inp)
