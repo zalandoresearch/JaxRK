@@ -7,7 +7,7 @@ import jax.numpy as np
 import numpy as onp
 import scipy as osp
 from jax import grad
-from jax.numpy import dot, log
+from jax.numpy import dot, log, exp
 from jax.scipy.special import logsumexp
 from numpy.random import rand
 
@@ -169,15 +169,18 @@ class FiniteVec(Vec):
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     @classmethod
-    def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1):
+    def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1) -> "FiniteVec":
         prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     def point_representant(self, sample = False):
-        n = self.pos_proj().normalized()
+        
         if not sample:
-            return n.inspace_points[np.argmax(n.prefactors.flatten()), :]
+            n = self.normalized()
+            repr_idx = choose_representer(n.inspace_points, n.prefactors.flatten(), n.k)
+            return n.inspace_points[repr_idx]
         else:
+            n = self.dens_proj()
             return n.inspace_points[jax.random.categorical(self.prngkey, log(n.prefactors.flatten())), :]
     
     def pos_proj(self, nsamps:int = None) -> "FiniteVec":
@@ -191,7 +194,16 @@ class FiniteVec(Vec):
         """
         assert(len(self) == 1)
         if nsamps is None:
-            return self.updated(pos_proj(self.inspace_points, self.prefactors, self.k))
+            G = kernel(self.inspace_points).astype(np.float64)
+            c = 2*self.reduce_gram(G)
+            def cost(f):
+                f = f.reshape((len(self), G.shape[0]))
+                return np.sum(dot(dot(f, G), f.T) - dot(f, c.T))
+            res = osp.optimize.minimize(__casted_output(cost),
+                                    rand(len(factors))+ 0.0001,
+                                    jac = __casted_output(grad(cost)),
+                                    bounds = [(0., None)] * len(factors))
+            return self.updated(pos_proj(self.inspace_points, res["x"], self.k))
         else:
             assert False, "Frank-Wolfe needs attention."
             #the problem are circular imports.
@@ -206,9 +218,33 @@ class FiniteVec(Vec):
         """
         return self.normalized().pos_proj(nsamps).normalized()
     
+    def rvs(self, nsamps:int = 1) -> np.array:
+        assert np.all(self.prefactors >= 0.)
+
+        #use residual resampling from SMC theory
+        if nsamps is None:
+            nsamps = len(pop)        
+        prop_w = log(self.normalized().prefactors)
+        mult = exp(prop_w + log(nsamps))
+        count = np.int32(np.floor(mult))
+        resid = log(mult - count)
+        resid = resid - logsumexp(resid)
+        count = count + onp.random.multinomial(nsamps - count.sum(), exp(resid))
+
+        rval = np.repeat(self.inspace_points, count, 0) + self.k.rvs(nsamps, self.inspace_points.shape[1])
+        return rval
+
+    
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
 
+def choose_representer(support_points, factors, kernel):
+    return choose_representer_from_gram(kernel(support_points).astype(np.float64), factors)
+
+def choose_representer_from_gram(G, factors):
+    fG = np.dot(factors, G)
+    rkhs_distances = np.sqrt(np.dot(factors, fG).flatten() + np.diag(G) - 2 * fG)
+    return np.argmin(rkhs_distances)
 
 def pos_proj(support_points, factors, kernel):
     G = kernel(support_points).astype(np.float64)

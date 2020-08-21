@@ -8,7 +8,7 @@ import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal, norm
 
 from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
@@ -114,7 +114,7 @@ class GaussianKernel(DensityKernel):
         return rval
 
     def rvs(self, nrows, ncols):
-        return np.random.randn(nrows, ncols) * self._sd
+        return norm.rvs(size = (nrows, ncols)) * self._sd
 
 class LaplaceKernel(DensityKernel):
     def __init__(self, sigma, diffable = False):
