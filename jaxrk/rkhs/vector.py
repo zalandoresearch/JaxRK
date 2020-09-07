@@ -68,6 +68,7 @@ class FiniteVec(Vec):
             self.__reduce_gram__ = lambda gram, axis: gram
             self.is_simple = True
             self.__len = len(self.inspace_points)
+        self._raw_gram_cache = None
 
     def __eq__(self, other):
         return (isinstance(other, self.__class__) and
@@ -173,12 +174,16 @@ class FiniteVec(Vec):
         prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
-    def point_representant(self, sample = False):
+    def point_representant(self, method = "inspace_point"):
         
-        if not sample:
+        if method == "inspace_point":
             n = self.normalized()
-            repr_idx = choose_representer(n.inspace_points, n.prefactors.flatten(), n.k)
+            if self._raw_gram_cache is None:
+                self._raw_gram_cache = n.k(n.inspace_points).astype(np.float64)
+            repr_idx = choose_representer_from_gram(self._raw_gram_cache, n.prefactors.flatten())
             return n.inspace_points[repr_idx]
+        elif method == "mean":
+            return np.atleast_1d([self.get_mean_var()[0]])
         else:
             n = self.dens_proj()
             return n.inspace_points[jax.random.categorical(self.prngkey, log(n.prefactors.flatten())), :]
@@ -243,8 +248,10 @@ def choose_representer(support_points, factors, kernel):
 
 def choose_representer_from_gram(G, factors):
     fG = np.dot(factors, G)
-    rkhs_distances = np.sqrt(np.dot(factors, fG).flatten() + np.diag(G) - 2 * fG)
-    return np.argmin(rkhs_distances)
+    rkhs_distances_sq = (np.dot(factors, fG).flatten() + np.diag(G) - 2 * fG).squeeze()
+    rval = np.argmin(rkhs_distances_sq)
+    assert rval < rkhs_distances_sq.size
+    return rval
 
 def pos_proj(support_points, factors, kernel):
     G = kernel(support_points).astype(np.float64)

@@ -20,6 +20,12 @@ ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
 
 class SparseReduce(GramReduce):
     def __init__(self, idcs:List[np.array], prefactors:ListOfArray_or_Array_T):
+        """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
+
+        Args:
+            idcs (List[np.array]): The indices of the rows to copy in the desired order
+            prefactors (ListOfArray_or_Array_T): Scalar prefactors for copied rows
+        """
         super().__init__()
         self.idcs = idcs
         self.max_idx = np.max(np.array([np.max(i) for i in idcs]))

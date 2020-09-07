@@ -7,6 +7,7 @@ Created on Thu Jan 10 10:01:56 2019
 
 from typing import Callable
 
+import numpy as onp
 import jax.numpy as np
 import jax.scipy as sp
 import jax.scipy.stats as stats
@@ -14,6 +15,7 @@ from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
+from scipy.spatial.distance import pdist
 
 from jaxrk.utilities.eucldist import eucldist
 
@@ -24,11 +26,11 @@ def median_heuristic(data, distance, per_dimension = True):
     else:
         dist_fn = distance
     if per_dimension is False:
-        return np.median(dist_fn(data))
+        return onp.median(dist_fn(data))
     else:
         def single_dim_heuristic(data_dim):
             return median_heuristic(data_dim[:, None], dist_fn, per_dimension = False)
-        return np.apply_along_axis(single_dim_heuristic, 0, data)
+        return onp.apply_along_axis(single_dim_heuristic, 0, data)
 
 class Kernel(object):
     """A generic kernel type."""

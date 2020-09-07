@@ -4,10 +4,12 @@ import copy
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
+from tqdm import tqdm
 
 
-from jaxrk.rkhs import FiniteVec, inner, SpVec
-from jaxrk.kern import GaussianKernel 
+from jaxrk.rkhs import FiniteVec, inner, SpVec, Cmo, RolloutSpVec
+from jaxrk.kern import GaussianKernel, SplitDimsKernel, PeriodicKernel, LinearKernel
+from jaxrk.reduce import SparseReduce
 
 rng = np.random.RandomState(1)
 
@@ -73,3 +75,27 @@ def test_SpVec(kernel, idx_kernel):
     assert len(fvec) == 3
     #when summing: assert np.allclose(fvec.inner(), np.array([[(col * fact[-col.shape[0]:, -col.shape[1]:]).sum() for col in row] for row in gram_selects]))
     assert np.allclose(fvec.inner(), np.array([[(col * fact[-col.shape[0]:, -col.shape[1]:]).mean() for col in row] for row in gram_selects]))
+
+def test_SpVecTraffic():
+    in_kern = PeriodicKernel(5, 1)
+    out_kern = GaussianKernel(0.5)
+    
+    resh_traf = np.random.random_integers(0, 12, 20 * 20 * 2).reshape((20, 20, 2))
+    resh_traf[:, :, 0] = np.arange(20)
+    regr_inp = resh_traf[:15, :-1, :].reshape((-1, 2))
+    regr_out = resh_traf[:15, 1:, :].reshape((-1, 2))[:, 1:2]
+    un, sr = SparseReduce.sum_from_unique(regr_out.flatten())
+    num_points_per_obs = resh_traf.shape[1] - 1
+    inp_vec = SpVec(in_kern, regr_inp, np.arange(1, regr_inp.shape[0] // num_points_per_obs + 1) * num_points_per_obs, gram_reduce=sr)
+    out_vec = FiniteVec(out_kern, un[:, np.newaxis],)
+    O = Cmo(inp_vec,out_vec)
+    test_inp = resh_traf[15:, :10, :].reshape((-1, 2))
+    
+    invec_inf = SpVec(in_kern, test_inp, np.array([test_inp.shape[0]]), use_subtrajectories = False) #initial observed trajectory/warmup
+    print(len(O @ invec_inf))
+    cur_ro = RolloutSpVec(O, invec_inf, 1)
+    rval = []
+    for i in tqdm(range(1, 10)):
+        new_point = cur_ro.current_outp_emb.point_representant()
+        rval.append(new_point)
+        cur_ro.update(new_point)
