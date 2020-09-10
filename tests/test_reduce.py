@@ -27,7 +27,14 @@ def test_SparseReduce():
     rgr = r(gram, 0)
     assert np.allclose(rgr[0], (gram[0] + gram[1]) / 2) 
     assert np.allclose(rgr[1], gram[0] + gram[3] * 2) 
-    assert np.allclose(rgr[2], (gram[0] + gram[3])/2) 
+    assert np.allclose(rgr[2], (gram[0] + gram[3])/2)
+
+def test_Sparse_Linear_reduce_from_unique():
+  inp = np.array([1,1,0,3,5,0])
+  un1, red1 = SparseReduce.sum_from_unique(inp)
+  un2, red2 = LinearReduce.sum_from_unique(inp)
+  i_out = np.outer(inp, inp)
+  assert red1.reduce_first_ax(i_out) == red2.reduce_first_ax(i_out)
 
 def test_LinearReduce():
     gram = rng.randn(4, 3)

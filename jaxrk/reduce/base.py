@@ -35,7 +35,7 @@ class GramReduce(Callable, ABC):
     def new_len(self, original_len:int) -> int:
         pass
 
-class NoReduce(Callable, ABC):
+class NoReduce(GramReduce):
     def __call__(self, gram:np.array, axis:int = 0) -> np.array:
         return gram
 

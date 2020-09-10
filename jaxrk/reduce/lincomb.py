@@ -48,16 +48,27 @@ class SparseReduce(GramReduce):
     def sum_from_unique(cls, input:np.array, mean:bool = True) -> (np.array, "SparseReduce"):        
         un, cts = np.unique(input, return_counts=True)
         if mean:
-            cts = (1./cts.flatten())[:, np.newaxis, np.newaxis]
+            pref = (1./cts.flatten())[:, np.newaxis, np.newaxis]
         else:
-            cts = np.ones_like(cts.flatten())[:, np.newaxis, np.newaxis]
+            pref = np.ones_like(cts.flatten())[:, np.newaxis, np.newaxis]
         un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
-        return un, SparseReduce(un_idx, cts)
+        return un, cts, SparseReduce(un_idx, pref)
 
 class LinearReduce(GramReduce):
     def __init__(self, linear_map:np.array):
         super().__init__()
         self.linear_map = linear_map
+    
+    @classmethod
+    def sum_from_unique(cls, input:np.array, mean:bool = True) -> (np.array, "LinearReduce"):
+        import numpy
+        un, cts = numpy.unique(input, return_counts=True)
+        un_idx = [numpy.argwhere(input == un[i]).flatten() for i in range(un.size)]
+        m = numpy.zeros((len(un_idx), input.shape[0]))
+        for i, idx in enumerate(un_idx):
+            b = numpy.ones(numpy.int(cts[i].squeeze()))
+            m[i][idx.squeeze()] =  b/cts[i].squeeze() if mean else b
+        return un, cts, LinearReduce(m)
     
    # @jit
     def reduce_first_ax(self, gram:np.array):
