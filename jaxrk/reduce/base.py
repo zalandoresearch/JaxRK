@@ -20,12 +20,8 @@ from jax.scipy.special import logsumexp
 class GramReduce(Callable, ABC):
     """The basic reduction type."""
     def __call__(self, gram:np.array, axis:int = 0) -> np.array:
-        if axis != 0:
-            gram = np.swapaxes(gram, axis, 0)
-        rval = self.reduce_first_ax(gram)
-        if axis != 0:
-            rval = np.swapaxes(rval, axis, 0)
-        return rval
+        rval = self.reduce_first_ax(np.swapaxes(gram, axis, 0))
+        return np.swapaxes(rval, axis, 0)
 
     @abstractmethod
     def reduce_first_ax(self, gram:np.array) -> np.array:

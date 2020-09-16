@@ -100,7 +100,7 @@ class SpVec(Vec):
         elif self.use_inner =="linear": 
             return 500*raw["gram_mix_red"]
         elif self.use_inner == "poly":
-            return (raw["gram_mix_red"] + 1 )**10
+            return (raw["gram_mix_red"] + 1 )**3
 
     def inner(self, Y=None, full=True, raw_cache = None):
         if raw_cache is None:

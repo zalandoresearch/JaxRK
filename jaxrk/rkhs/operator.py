@@ -165,12 +165,17 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
 class Cmo(FiniteMap[InpVecT, OutVecT]):
     """conditional mean operator
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, center = False):
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, center = False, regul_func = None):
         regul = np.array(regul, dtype=np.float32)
 
         #we do not center the output features - this still leads to the correct results in the output of the CME
-        c_inp_feat = inp_feat.centered() if center else inp_feat            
-        matr = np.linalg.inv(inner(c_inp_feat) + regul * np.eye(len(inp_feat)))
+        c_inp_feat = inp_feat.centered() if center else inp_feat
+        G = inner(c_inp_feat)
+        if regul_func is None:
+            assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)       
+            matr = np.linalg.inv(G + regul * np.eye(len(inp_feat)))
+        else:
+            matr = regul_func(G)
         super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center)
 
 class Cdo(FiniteMap[InpVecT, OutVecT]):

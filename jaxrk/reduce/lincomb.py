@@ -13,6 +13,8 @@ import jax.scipy as sp
 import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
+from jax.lax import scan, map
+from jax import vmap
 
 
 from .base import GramReduce
@@ -20,7 +22,7 @@ from .base import GramReduce
 ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
 
 class SparseReduce(GramReduce):
-    def __init__(self, idcs:List[np.array], prefactors:ListOfArray_or_Array_T):
+    def __init__(self, idcs:List[np.array], average:bool = True):
         """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
 
         Args:
@@ -30,15 +32,20 @@ class SparseReduce(GramReduce):
         super().__init__()
         self.idcs = idcs
         self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
-        self.prefactors = [(p if len(p.shape) == 2 else p[:, np.newaxis])
-                                for p in prefactors]
+        if average:
+            self._reduce = np.mean
+        else:
+            self._reduce = np.sum
+    
+
     
     def reduce_first_ax(self, gram:np.array) -> np.array:
         assert (self.max_idx + 1) <= len(gram), self.__class__.__name__ + " expects a longer gram to operate on"
-        rval = []
+        #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
+        rval = np.zeros((len(self.idcs), gram.shape[1]))
         for i, idx in enumerate(self.idcs):
-            rval.append(np.sum(gram[idx] * self.prefactors[i], 0))
-        return np.array(rval)
+            rval = rval.at[i].set(self._reduce(gram[idx], 0))
+        return rval
     
     def new_len(self, original_len:int):
         assert (self.max_idx + 1) <= original_len, self.__class__.__name__ + " expects a longer gram to operate on"
@@ -48,12 +55,8 @@ class SparseReduce(GramReduce):
     @classmethod
     def sum_from_unique(cls, input:np.array, mean:bool = True) -> (np.array, "SparseReduce"):        
         un, cts = np.unique(input, return_counts=True)
-        if mean:
-            pref = (1./cts.flatten())[:, np.newaxis, np.newaxis]
-        else:
-            pref = np.ones_like(cts.flatten())[:, np.newaxis, np.newaxis]
         un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
-        return un, cts, SparseReduce(un_idx, pref)
+        return un, cts, SparseReduce(un_idx, mean)
 
 class LinearReduce(GramReduce):
     def __init__(self, linear_map:np.array):
@@ -70,7 +73,7 @@ class LinearReduce(GramReduce):
             m = m.at[i, idx.squeeze()].set(b/cts[i].squeeze() if mean else b)
         return un, cts, LinearReduce(m)
     
-   # @jit
+   
     def reduce_first_ax(self, gram:np.array):
         assert self.linear_map.shape[1] == gram.shape[0]
         return self.linear_map @ gram
