@@ -130,50 +130,58 @@ class SpVec(Vec):
     def reduce_gram(self, gram, axis = 0):
         return self._gram_reduce(gram, axis)
 
+class UpdatableSpVecInner(object):
+    def __init__(self, unchanging:SpVec, updatable:SpVec):
+        self.unchanging = unchanging
+        self.updatable = updatable
+        self._num_obs = updatable.inspace_points.shape[0]
+        self.current_raw = self.unchanging._inner_raw(updatable)
+        self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
+
+    def update(self, new_idx, new_obs):
+        new_idx_obs = np.array((new_idx, new_obs)).reshape(1,-1)
+
+        gram_mixed = self.current_raw["gram_mix_red"]
+        upd_mixed = self.unchanging._raw_reduce_gram(self.unchanging.k(self.unchanging.inspace_points, new_idx_obs))
+        new_gram_mixed = (gram_mixed * self._num_obs + upd_mixed)/(self._num_obs + 1)
+        self.current_raw["gram_mix_red"] = new_gram_mixed
+        
+        if self.unchanging.use_inner == "gen_gauss":
+
+            history_newpoint = self.updatable._raw_reduce_gram(self.updatable.k(self.updatable.inspace_points,
+                                                                                     new_idx_obs))
+            upd_self = self.updatable.k(new_idx_obs) + 2 * self._num_obs * history_newpoint
+
+            self.current_raw["gram_other_red"] = (self.current_raw["gram_other_red"] * self._num_obs**2 + upd_self) / (self._num_obs + 1)**2
+
+        self.updatable = SpVec(self.unchanging.k,
+                                    np.vstack([self.updatable.inspace_points, new_idx_obs]),
+                                    np.array([self._num_obs + 1]),
+                                    use_subtrajectories = False,
+                                    use_inner=self.unchanging.use_inner)
+        self._num_obs += 1
+        self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
+
 class RolloutSpVec(object):
     def __init__(self, cm_op:Cmo[SpVec, FiniteVec], initial_spvec:SpVec, dim_index):
         assert(len(initial_spvec) == 1)
         self._inc = (initial_spvec.inspace_points[1:, :dim_index] -  initial_spvec.inspace_points[:-1, :dim_index]).mean(0)
         self._cmo = cm_op
-        self._current_raw = self._cmo.inp_feat._inner_raw(initial_spvec)
-        # for k in self._current_raw:
-        #     print("Initialization")
-        #     print(k, self._current_raw[k].shape)
-        self._num_obs = initial_spvec.inspace_points.shape[0]
         self._next_idx = initial_spvec.inspace_points[-1,  :dim_index] + self._inc
-        self._spvec_history = initial_spvec
 
-        gram = self._cmo.inp_feat.inner(initial_spvec, raw_cache = self._current_raw)
-        #print("Gram", gram.shape)
+        self.uinner = UpdatableSpVecInner(self._cmo.inp_feat, initial_spvec)
+        gram = self._cmo.inp_feat.inner(initial_spvec, raw_cache = self.uinner.current_raw)
+        
         self.current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
                                                                 self._cmo.outp_feat.inspace_points,
                                                                 np.squeeze(self._cmo.matr @ gram))
 
-    def update(self, new_point):
-        new_idx_obs = np.array((self._next_idx, new_point)).reshape(1,-1)
-        self._next_idx += self._inc
+    def update(self, new_obs = None, new_idx = "auto"):
+        assert new_obs is not None
+        if new_idx is None or new_idx == "auto":
+            new_idx = self._next_idx        
+        self._next_idx = new_idx + self._inc
 
-        gram_mixed = self._current_raw["gram_mix_red"]
-        upd_mixed = self._cmo.inp_feat._raw_reduce_gram(self._cmo.inp_feat.k(self._cmo.inp_feat.inspace_points, new_idx_obs))
-        new_gram_mixed = (gram_mixed * self._num_obs + upd_mixed)/(self._num_obs + 1)
-        self._current_raw["gram_mix_red"] = new_gram_mixed
-        
-        if self._cmo.inp_feat.use_inner == "gen_gauss":
+        self.uinner.update(new_idx, new_obs)
 
-            history_newpoint = self._spvec_history._raw_reduce_gram(self._spvec_history.k(self._spvec_history.inspace_points,
-                                                                                     new_idx_obs))
-            upd_self = self._spvec_history.k(new_idx_obs) + 2 * self._num_obs * history_newpoint
-
-            self._current_raw["gram_other_red"] = (self._current_raw["gram_other_red"] * self._num_obs**2 + upd_self) / (self._num_obs + 1)**2
-
-            self._spvec_history = SpVec(self._cmo.inp_feat.k,
-                                        np.vstack([self._spvec_history.inspace_points, new_idx_obs]),
-                                        np.array([self._num_obs + 1]),
-                                        use_subtrajectories = False,
-                                        use_inner=self._cmo.inp_feat.use_inner)
-
-        self._num_obs += 1
-
-        inp_gram = self._cmo.inp_feat.inner(self._spvec_history, raw_cache = self._current_raw).squeeze()
-        # print("Gram", inp_gram.shape)
-        self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
+        self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ self.uinner.current_gram)

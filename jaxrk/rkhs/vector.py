@@ -7,9 +7,11 @@ import jax.numpy as np
 import numpy as onp
 import scipy as osp
 from jax import grad
-from jax.numpy import dot, log, exp
+from jax.numpy import dot, exp, log
 from jax.scipy.special import logsumexp
 from numpy.random import rand
+
+from jaxrk.reduce import GramReduce, NoReduce
 
 from .base import Map, RkhsObject, Vec
 
@@ -284,28 +286,31 @@ V1T = TypeVar("V1T")
 V2T = TypeVar("V2T")
 
 class CombVec(Vec, Generic[V1T, V2T]):
-    def __init__(self, v1:V1T, v2:V2T, operation):
+    def __init__(self, v1:V1T, v2:V2T, operation, gram_reduce:GramReduce = NoReduce()):
         assert(len(v1) == len(v2))
         self.__len = len(v1)
         (self.v1, self.v2) = (v1, v2)
-        self.operation = operation
+        self.combine = operation
+        self._gram_reduce = gram_reduce
     
     def reduce_gram(self, gram, axis = 0):
-        return gram
+        return self._gram_reduce(gram, axis)
 
     def inner(self, Y:"CombVec[V1T, V2T]"=None, full=True):
         if Y is None:
             Y = self
         else:
-            assert(Y.operation == self.operation)
-        return self.operation(self.v1.inner(Y.v1), self.v2.inner(Y.v2))
+            assert(Y.combine == self.combine)
+        return self.reduce_gram(Y.reduce_gram(self.combine(self.v1.inner(Y.v1), self.v2.inner(Y.v2)), 1), 0)
 
     def __len__(self):
-        return self.__len
+        if self._gram_reduce is None:
+            return self.__len
+        else:
+            return self._gram_reduce.new_len(self.__len)
 
     def updated(self, prefactors):
         raise NotImplementedError()
-
 
 def inner(X, Y=None, full=True):
     return X.inner(Y, full)
