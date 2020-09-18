@@ -3,7 +3,7 @@ from jax import jit, vmap, lax
 
 from .base import Vec, Map, RkhsObject
 
-from jaxrk.rkhs.vector import FiniteVec
+from jaxrk.rkhs.vector import FiniteVec, CombVec
 from jaxrk.rkhs.operator import Cmo
 from jaxrk.reduce import GramReduce, NoReduce
 
@@ -185,3 +185,27 @@ class RolloutSpVec(object):
         self.uinner.update(new_idx, new_obs)
 
         self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ self.uinner.current_gram)
+
+class RolloutCombVec(object):
+    def __init__(self, cm_op:Cmo[CombVec[SpVec, FiniteVec], FiniteVec], initial_spvec:SpVec, dim_index):
+        assert(len(initial_spvec) == 1)
+        self._inc = (initial_spvec.inspace_points[1:, :dim_index] -  initial_spvec.inspace_points[:-1, :dim_index]).mean(0)
+        self._cmo = cm_op
+        self._next_idx = initial_spvec.inspace_points[-1,  :dim_index] + self._inc
+
+        self.uinner = UpdatableSpVecInner(self._cmo.inp_feat.v1, initial_spvec)
+        gram = self._cmo.inp_feat.v1.inner(initial_spvec, raw_cache = self.uinner.current_raw)
+        
+
+
+    def update(self, new_obs = None, new_idx = "auto"):
+        assert new_obs is not None
+        if new_idx is None or new_idx == "auto":
+            new_idx = self._next_idx        
+        self._next_idx = new_idx + self._inc
+
+        self.uinner.update(new_idx, new_obs)
+
+    def get_embedding(self, idx):
+        inp_gram = self._cmo.inp_feat.reduce_gram(self._cmo.inp_feat.combine(self.uinner.current_gram, self._cmo.inp_feat.v2(idx)))
+        return self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
