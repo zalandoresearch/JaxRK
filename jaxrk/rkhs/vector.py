@@ -282,8 +282,8 @@ def distr_estimate_optimization(kernel, support_points, est="support"):
 
     return res["x"]/res["x"].sum()
 
-V1T = TypeVar("V1T")
-V2T = TypeVar("V2T")
+V1T = TypeVar("V1T", bound=Vec) # TypeError: A single constraint is not allowed
+V2T = TypeVar("V2T", bound=Vec)
 
 class CombVec(Vec, Generic[V1T, V2T]):
     def __init__(self, v1:V1T, v2:V2T, operation, gram_reduce:GramReduce = NoReduce()):
