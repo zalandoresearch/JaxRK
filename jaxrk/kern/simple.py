@@ -73,6 +73,6 @@ class PeriodicKernel(Kernel):
         if diag:
             assert()
         else:
-            dists = eucldist(X, Y, power = 1.)
+            dists = eucldist(X/self.period, Y/self.period, power = 1.)
         assert(not logsp)
-        return exp(- 2* np.sin(np.pi*dists/self.period)**2 / self.ls**2)
+        return exp(- 2* np.sin(np.pi*dists)**2 / self.ls**2)
