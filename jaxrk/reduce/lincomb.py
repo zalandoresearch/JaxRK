@@ -8,6 +8,7 @@ Created on Thu Jan 10 10:01:56 2019
 from typing import Callable, List, TypeVar, Tuple
 
 from jax import jit
+from functools import partial
 import jax.numpy as np
 import jax.scipy as sp
 import jax.scipy.stats as stats
@@ -78,7 +79,7 @@ class SparseBlockReduce(GramReduce):
         self.result_len = np.sum([len(e) for e in idcs])
         self.block_boundaries = block_boundaries
 
-    
+    @partial(jit, static_argnums=(0,))
     def reduce_first_ax(self, gram:np.array) -> np.array:
         assert (self.max_idx + 1) <= len(gram), self.__class__.__name__ + " expects a longer gram to operate on"
         #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
@@ -116,6 +117,7 @@ class SparseBlockReduce(GramReduce):
             el.append(np.array([un_idx_sorted[j] for j in range(change[i], change[i+1])]))
 
         return un_sorted, cts_sorted, SparseBlockReduce(el, change, mean)
+
 
 class LinearReduce(GramReduce):
     def __init__(self, linear_map:np.array):
