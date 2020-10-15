@@ -67,12 +67,37 @@ class PeriodicKernel(Kernel):
 
     def gram(self, X, Y=None, diag = False, logsp = False):
         assert(len(np.shape(X))==2)
-
-        # if X=Y, use more efficient pdist call which exploits symmetry
+        X = X / self.period
+        if Y is not None:
+            Y = Y / self.period
 
         if diag:
             assert()
         else:
-            dists = eucldist(X/self.period, Y/self.period, power = 1.)
+            dists = eucldist(X, Y, power = 1.)
         assert(not logsp)
         return exp(- 2* np.sin(np.pi*dists)**2 / self.ls**2)
+
+class SpikeKernel(Kernel):
+    def __init__(self, spike:float = 1., non_spike:float = 0.5, threshold_sq_eucl_distance = 0.):
+        """[summary]
+
+        Args:
+            spike (float, optional): Kernel value > 0 when input point is equal. Defaults to 1.
+            non_spike (float, optional): Kernel value when input point is unequal. abs(non_spike) < spike. Defaults to 0.5.
+        """
+        assert spike > 0
+        assert abs(non_spike)  < spike
+
+        self.spike = spike
+        self.non_spike = non_spike
+        self.threshold_sq_eucl_distance = threshold_sq_eucl_distance
+
+    def gram(self, X, Y=None, diag = False, logsp = False):
+        assert(len(np.shape(X))==2)
+        if diag:
+            assert()
+        else:
+            dists = eucldist(X, Y, power = 2.)
+        assert(not logsp)
+        return np.where(dists <= self.threshold_sq_eucl_distance, self.spike, self.non_spike)
