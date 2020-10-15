@@ -1,11 +1,14 @@
+from typing import Union, Iterable, Iterator
+
 import jax.numpy as np
-from jax import jit, vmap, lax
-
-from .base import Vec, Map, RkhsObject
-
-from jaxrk.rkhs.vector import FiniteVec, CombVec
-from jaxrk.rkhs.operator import Cmo
+from jax import jit, lax, vmap
+from jax.ops import index, index_add, index_update
 from jaxrk.reduce import GramReduce, NoReduce
+from jaxrk.rkhs.operator import Cmo
+from jaxrk.rkhs.vector import CombVec, FiniteVec
+
+from .base import Map, RkhsObject, Vec
+
 
 class SpVec(Vec):
     # FIXME: Reference index enters Kernel regression as input; with shift-invariant kernel we get dependence on reference index
@@ -140,7 +143,7 @@ class UpdatableSpVecInner(object):
         self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
 
     def update(self, new_idx, new_obs):
-        new_idx_obs = np.array((new_idx, new_obs)).reshape(1,-1)
+        new_idx_obs = np.concatenate((new_idx, new_obs), 0).reshape(1,-1)
 
         gram_mixed = self.current_raw["gram_mix_red"]
         upd_mixed = self.unchanging._raw_reduce_gram(self.unchanging.k(self.unchanging.inspace_points, new_idx_obs))
@@ -163,57 +166,84 @@ class UpdatableSpVecInner(object):
         self._num_obs += 1
         self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
 
-class RolloutSpVec(object):
-    def __init__(self, cm_op:Cmo[SpVec, FiniteVec], initial_spvec:SpVec, dim_index):
-        assert len(initial_spvec) == 1
-        self._inc = (initial_spvec.inspace_points[1:, :dim_index] -  initial_spvec.inspace_points[:-1, :dim_index]).mean(0)
-        self._cmo = cm_op
-        self._next_idx = initial_spvec.inspace_points[-1,  :dim_index] + self._inc
+class RolloutIdx(Iterator[np.array], Iterable[np.array]):
+    def __init__(self, start:np.array, periodicities:np.array = None, stepsizes:np.array = None, example:np.array = None):
+        """An IndexRollout object zig-zags through indices with periodicities given in initialization.
+        At most one periodicity can be NaN, in which case it is taken to be ever-increasing
 
-        self.uinner = UpdatableSpVecInner(self._cmo.inp_feat, initial_spvec)
+        Args:
+            periodicities (np.array): The periodicities, the first one can be np.inf. When a digit would become larger than its periodicity, the previous digit is increased
+            stepsizes (np.array, optional): [description]. Defaults to None. Step sizes for increasing the index.
+            example (np.array, optional): [description]. Defaults to None. Examples of consecutive indices (in rows) for inferring step sizes.
+        """
+        self.current = start
         
-        self.current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
-                                                                self._cmo.outp_feat.inspace_points,
-                                                                np.squeeze(self._cmo.matr @ self.uinner.current_gram))
+        if example is not None:
+            self.stepsizes = np.array([np.median(x[x>0]) for x in (example[1:] - example[:-1]).T])
+            self.periodicities = example.max(0) + self.stepsizes
+        else:
+            assert stepsizes is not None and periodicities is not None
+            self.stepsizes = stepsizes
+            self.periodicities = periodicities
 
-    def update(self, new_obs = None, new_idx = "auto"):
-        assert new_obs is not None
-        if new_idx is None or new_idx == "auto":
-            new_idx = self._next_idx        
-        self._next_idx = new_idx + self._inc
+    def __next__(self) -> np.array:
+        assert self.current.shape == self.periodicities.shape
+        rval = self.current
+        for i in range(self.current.size - 1, -1, -1):
+            upd = self.current[i] + self.stepsizes[i]
+            if upd >= self.periodicities[i]:
+                rval = rval.at[i].set(0.)
+            else:
+                rval = rval.at[i].set(upd)
+                break
+        self.current = rval
+        return rval
+    
+    def __iter__(self) -> Iterator[np.array]:
+        return self
 
+
+class RolloutSp(object):
+    def __init__(self,
+                 cm_op:Union[Cmo[SpVec, FiniteVec], Cmo[CombVec[SpVec, FiniteVec], FiniteVec]],
+                 initial_spvec:SpVec,
+                 dim_index:int,
+                 idx_ro:RolloutIdx = None):
+        assert len(initial_spvec) == 1
+        self._cmo = cm_op
+        self._idx_ro = idx_ro
+
+        if cm_op.inp_feat.__class__ == CombVec:
+            self.uinner = UpdatableSpVecInner(self._cmo.inp_feat.v1, initial_spvec)
+            self.current_outp_emb = self._cmo.outp_feat.sum()
+            self.get_embedding = self.__get_embedding_CombVec
+            self.__update_current_outp_emb = lambda : None
+        else:
+            self.uinner = UpdatableSpVecInner(self._cmo.inp_feat, initial_spvec)
+            self.current_outp_emb =  FiniteVec.construct_RKHS_Elem(self._cmo.outp_feat.k,
+                                                                    self._cmo.outp_feat.inspace_points,
+                                                                    np.squeeze(self._cmo.matr @ self.uinner.current_gram))
+            self.get_embedding = self.__get_embedding_SpVec
+            self.__update_current_outp_emb = self.__update_current_outp_emb_SpVec
+
+
+
+    def update(self, new_obs, new_idx):
         self.uinner.update(new_idx, new_obs)
-
+        
+        self.__update_current_outp_emb()
+    
+    def __update_current_outp_emb_SpVec(self):
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
-
         self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ self.uinner.current_gram)
     
-    def get_embedding(self, idx = None):
+    def __get_embedding_SpVec(self, idx = None):
         return self.current_outp_emb
 
-class RolloutCombVec(object):
-    def __init__(self, cm_op:Cmo[CombVec[SpVec, FiniteVec], FiniteVec], initial_spvec:SpVec, dim_index):
-        assert(len(initial_spvec) == 1)
-        self._inc = (initial_spvec.inspace_points[1:, :dim_index] -  initial_spvec.inspace_points[:-1, :dim_index]).mean(0)
-        self._cmo = cm_op
-        self._next_idx = initial_spvec.inspace_points[-1,  :dim_index] + self._inc
 
-        self.uinner = UpdatableSpVecInner(self._cmo.inp_feat.v1, initial_spvec)
-        self.current_outp_emb = self._cmo.outp_feat.sum()
-        
-
-
-    def update(self, new_obs = None, new_idx = "auto"):
-        assert new_obs is not None
-        if new_idx is None or new_idx == "auto":
-            new_idx = self._next_idx        
-        self._next_idx = new_idx + self._inc
-
-        self.uinner.update(new_idx, new_obs)
-
-    def get_embedding(self, idx = None):
+    def __get_embedding_CombVec(self, idx = None):
         if idx is None:
-            idx = self._next_idx
+            idx = self._idx_ro.current
         
         idx_gram = self._cmo.inp_feat.v2(np.atleast_2d(idx)).squeeze()
         assert len(self.uinner.current_gram.shape) == 1 and len(idx_gram.shape) == 1
@@ -221,3 +251,4 @@ class RolloutCombVec(object):
         inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram, 0)
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
         return self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
+
