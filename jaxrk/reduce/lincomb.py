@@ -19,11 +19,11 @@ from jax import vmap
 from jax.ops import index_update
 
 
-from .base import GramReduce
+from .base import Reduce
 
 ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
 
-class SparseReduce(GramReduce):
+class SparseReduce(Reduce):
     def __init__(self, idcs:List[np.array], average:bool = True):
         """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
 
@@ -41,12 +41,13 @@ class SparseReduce(GramReduce):
     
 
     
-    def reduce_first_ax(self, gram:np.array) -> np.array:
-        assert (self.max_idx + 1) <= len(gram), self.__class__.__name__ + " expects a longer gram to operate on"
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        assert (self.max_idx + 1) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
+        assert len(inp.shape) == 2
         #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
-        rval = np.zeros((len(self.idcs), gram.shape[1]))
+        rval = np.zeros((len(self.idcs), inp.shape[1]))
         for i, idx in enumerate(self.idcs):
-            rval = rval.at[i].set(self._reduce(gram[idx, :], 0))
+            rval = rval.at[i].set(self._reduce(inp[idx, :], 0))
         return rval
     
     def new_len(self, original_len:int):
@@ -60,7 +61,7 @@ class SparseReduce(GramReduce):
         un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
         return un, cts, SparseReduce(un_idx, mean)
 
-class SparseBlockReduce(GramReduce):
+class SparseBlockReduce(Reduce):
     def __init__(self, idcs:List[np.array], block_boundaries:np.array, average:bool = True):
         """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
 
@@ -80,15 +81,16 @@ class SparseBlockReduce(GramReduce):
         self.block_boundaries = block_boundaries
 
     @partial(jit, static_argnums=(0,))
-    def reduce_first_ax(self, gram:np.array) -> np.array:
-        assert (self.max_idx + 1) <= len(gram), self.__class__.__name__ + " expects a longer gram to operate on"
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        assert (self.max_idx + 1) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
+        assert len(inp.shape) == 2
         #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
         rval = []
 
         for i in range(len(self.block_boundaries) - 1):
             start = self.block_boundaries[i]
             end = self.block_boundaries[i+1]
-            reduced = self._reduce(gram[list(self.idcs[i].flatten()),:].reshape((-1, self.idcs[i].shape[1], gram.shape[1])), 1)
+            reduced = self._reduce(inp[list(self.idcs[i].flatten()),:].reshape((-1, self.idcs[i].shape[1], inp.shape[1])), 1)
             rval.append(reduced)
         return np.concatenate(rval, 0)
     
@@ -119,7 +121,7 @@ class SparseBlockReduce(GramReduce):
         return un_sorted, cts_sorted, SparseBlockReduce(el, change, mean)
 
 
-class LinearReduce(GramReduce):
+class LinearReduce(Reduce):
     def __init__(self, linear_map:np.array):
         super().__init__()
         self.linear_map = linear_map
@@ -135,9 +137,10 @@ class LinearReduce(GramReduce):
         return un, cts, LinearReduce(m)
     
    
-    def reduce_first_ax(self, gram:np.array):
-        assert self.linear_map.shape[1] == gram.shape[0]
-        return self.linear_map @ gram
+    def reduce_first_ax(self, inp:np.array):
+        assert len(inp.shape) == 2
+        assert self.linear_map.shape[1] == inp.shape[0]
+        return self.linear_map @ inp
     
     def new_len(self, original_len:int):
         assert (self.linear_map.shape[1]) == original_len, self.__class__.__name__ + " expects a gram with %d columns" % self.linear_map.shape[1]

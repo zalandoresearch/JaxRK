@@ -3,7 +3,7 @@ from typing import Union, Iterable, Iterator
 import jax.numpy as np
 from jax import jit, lax, vmap
 from jax.ops import index, index_add, index_update
-from jaxrk.reduce import GramReduce, NoReduce
+from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.rkhs.operator import Cmo
 from jaxrk.rkhs.vector import CombVec, FiniteVec
 
@@ -26,7 +26,7 @@ class SpVec(Vec):
         gram_reduce         - which reduction to apply to gram matrix
     """
     def __init__(self, kern, idx_obs_points, realization_num_obs,
-                       use_subtrajectories = True, use_inner = "gen_gauss", gram_reduce:GramReduce = NoReduce()):
+                       use_subtrajectories = True, use_inner = "gen_gauss", gram_reduce:Reduce = NoReduce()):
         self.k = kern
         self.inspace_points = idx_obs_points
 
@@ -248,7 +248,7 @@ class RolloutSp(object):
         idx_gram = self._cmo.inp_feat.v2(np.atleast_2d(idx)).squeeze()
         assert len(self.uinner.current_gram.shape) == 1 and len(idx_gram.shape) == 1
         inp_gram = self._cmo.inp_feat.combine(self.uinner.current_gram, idx_gram)
-        inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram, 0)
+        inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram[:, np.newaxis], 0).squeeze()
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
         return self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
 

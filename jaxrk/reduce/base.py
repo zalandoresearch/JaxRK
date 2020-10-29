@@ -17,10 +17,10 @@ from jax.scipy.special import logsumexp
 
 
 
-class GramReduce(Callable, ABC):
+class Reduce(Callable, ABC):
     """The basic reduction type."""
-    def __call__(self, gram:np.array, axis:int = 0) -> np.array:
-        rval = self.reduce_first_ax(np.swapaxes(gram, axis, 0))
+    def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+        rval = self.reduce_first_ax(np.swapaxes(inp, axis, 0))
         return np.swapaxes(rval, axis, 0)
 
     @abstractmethod
@@ -31,12 +31,12 @@ class GramReduce(Callable, ABC):
     def new_len(self, original_len:int) -> int:
         pass
 
-class NoReduce(GramReduce):
-    def __call__(self, gram:np.array, axis:int = 0) -> np.array:
-        return gram
+class NoReduce(Reduce):
+    def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+        return inp
 
-    def reduce_first_ax(self, gram:np.array) -> np.array:
-        return gram
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        return inp
     
     def new_len(self, original_len:int) -> int:
         return original_len

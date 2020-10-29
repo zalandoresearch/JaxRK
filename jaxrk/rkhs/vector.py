@@ -11,7 +11,7 @@ from jax.numpy import dot, exp, log
 from jax.scipy.special import logsumexp
 from numpy.random import rand
 
-from jaxrk.reduce import GramReduce, NoReduce
+from jaxrk.reduce import Reduce, NoReduce
 
 from .base import Map, RkhsObject, Vec
 
@@ -27,7 +27,7 @@ class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
-    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None, center = False):
+    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None, center = False, undo_center = False):
         row_splits = None
         self.k = kern
         self.inspace_points = inspace_points
@@ -44,7 +44,9 @@ class FiniteVec(Vec):
         self.__reconstruction_kwargs = {"center" : center}
 
         self.prefactors = prefactors
+        assert not (center and undo_center), "can't both center and undo center"
         self.center = center
+        self.undo_center = undo_center
 
 
         if (points_per_split is not None) or (row_splits is not None):
@@ -147,10 +149,18 @@ class FiniteVec(Vec):
 
         return FiniteVec(self.k, self.inspace_points, self.prefactors, **kwargs)
 
+    def undo_center(self):
+        kwargs = copy(self.__reconstruction_kwargs)
+        kwargs["undo_center"] = True
+
+        return FiniteVec(self.k, self.inspace_points, self.prefactors, **kwargs)
+
     def reduce_gram(self, gram, axis = 0):
         gram = gram.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
         gram = self.__reduce_gram__(gram, axis)
         if self.center:
+            gram = gram - np.mean(gram, axis, keepdims = True)
+        elif self.undo_center:
             gram = gram - np.mean(gram, axis, keepdims = True)
         return gram
     
@@ -165,6 +175,7 @@ class FiniteVec(Vec):
             return (np.squeeze(mean), np.squeeze(var))
     
     def sum(self,):
+        #FIXME: this should respect gram_reduce!
         return FiniteVec(self.k, self.inspace_points, self.prefactors, points_per_split = len(self.inspace_points))
     
     @classmethod
@@ -282,11 +293,11 @@ def distr_estimate_optimization(kernel, support_points, est="support"):
 
     return res["x"]/res["x"].sum()
 
-V1T = TypeVar("V1T", bound=Vec) # TypeError: A single constraint is not allowed
+V1T = TypeVar("V1T", bound=Vec)
 V2T = TypeVar("V2T", bound=Vec)
 
 class CombVec(Vec, Generic[V1T, V2T]):
-    def __init__(self, v1:V1T, v2:V2T, operation, gram_reduce:GramReduce = NoReduce()):
+    def __init__(self, v1:V1T, v2:V2T, operation, gram_reduce:Reduce = NoReduce()):
         assert(len(v1) == len(v2))
         self.__len = len(v1)
         (self.v1, self.v2) = (v1, v2)
