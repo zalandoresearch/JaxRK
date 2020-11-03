@@ -26,7 +26,7 @@ class SpVec(Vec):
         gram_reduce         - which reduction to apply to gram matrix
     """
     def __init__(self, kern, idx_obs_points, realization_num_obs,
-                       use_subtrajectories = True, use_inner = "gen_gauss", gram_reduce:Reduce = NoReduce()):
+                       use_subtrajectories = True, use_inner = "gen_gauss", reduce:Reduce = []):
         self.k = kern
         self.inspace_points = idx_obs_points
 
@@ -53,7 +53,7 @@ class SpVec(Vec):
                     return np.cumsum(x, axis = 0) / np.arange(1, x.shape[0] + 1).reshape((-1, 1))
             self.__reduce_sum_func = reduce_func
             self.__len = self.process_boundaries[-1]
-        self._gram_reduce = gram_reduce
+        self._reduce = reduce
 
 
 
@@ -62,13 +62,13 @@ class SpVec(Vec):
                 other.inspace_points.shape == self.inspace_points.shape and
                 np.all(other.inspace_points == self.inspace_points) and
                 other.k == self.k and
-                self._gram_reduce == other._gram_reduce )
+                self._reduce == other._reduce )
 
     def __len__(self):
-        if self._gram_reduce is None:
+        if self._reduce is None:
             return self.__len
         else:
-            return self._gram_reduce.new_len(self.__len)
+            return self._reduce.new_len(self.__len)
 
     def _inner_raw(self, Y=None, full=True):
         if not full and Y is not None:
@@ -131,7 +131,7 @@ class SpVec(Vec):
         return rval
     
     def reduce_gram(self, gram, axis = 0):
-        return self._gram_reduce(gram, axis)
+        return Reduce.apply(gram, self._reduce, axis)
 
 class UpdatableSpVecInner(object):
     def __init__(self, unchanging:SpVec, updatable:SpVec):

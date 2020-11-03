@@ -1,3 +1,7 @@
+from copy import copy
+from jaxrk.reduce.centop_reductions import CenterInpFeat, DecenterOutFeat
+from jaxrk.reduce.lincomb import LinearReduce
+from jaxrk.reduce.base import Prefactors, Sum
 from typing import Generic, TypeVar, Callable
 
 import jax.numpy as np
@@ -20,16 +24,18 @@ CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT, np.array)
 class FiniteMap(Map[InpVecT, OutVecT]):
     """Finite rank affine map in RKHS
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False):
-        self.outp_feat = outp_feat
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False, decenter_outp:bool = False):
+        
         self.matr = matr
+        self.const_cent_term = 0
         self.mean_center_inp = mean_center_inp
-        if self.mean_center_inp:
-            self.inp_feat = inp_feat.centered() 
-            self.const_cent_term = - inner(self.inp_feat, inp_feat.sum())
-        else:
+        self.decenter_outp = decenter_outp
+        if not mean_center_inp:
             self.inp_feat = inp_feat
-            self.const_cent_term = 0.
+            self.outp_feat = outp_feat
+        else:
+            self.inp_feat = inp_feat.extend_reduce([CenterInpFeat(inp_feat.inner())])
+            self.outp_feat = outp_feat
 
     
     def __len__(self):
@@ -46,12 +52,18 @@ class FiniteMap(Map[InpVecT, OutVecT]):
             return rval
         else:
             if isinstance(inp, DeviceArray):
-                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
-            if len(inp) == 1:
-                return FiniteVec.construct_RKHS_Elem(self.outp_feat.k, self.outp_feat.inspace_points, np.squeeze(self.matr @ self._corrected_gram(inp)))
+                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))  
+            lin_map = (self.matr @ self._corrected_gram(inp)).T
+            
+            
+            if self.decenter_outp:
+                r = [DecenterOutFeat(lin_map)]
             else:
-                pref = self.matr @ self._corrected_gram(inp)
-                return FiniteVec(self.outp_feat.k, np.tile(self.outp_feat.inspace_points, (pref.shape[1], 1)), np.hstack(pref.T), points_per_split=pref.shape[0])
+                lin_map = lin_map / lin_map.sum(1, keepdims = True)
+                r = [LinearReduce(lin_map)]
+            if len(inp) == 1:
+                r.append(Sum())
+            return self.outp_feat.extend_reduce(r)
 
     def __call__(self, inp:DeviceArray) -> RkhsObject:
         return self @ FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
@@ -72,11 +84,18 @@ class CrossCovOp(FiniteMap[InpVecT, OutVecT]):
         self.regul = regul
 
 class CovOp(FiniteMap[InpVecT, InpVecT]):
-    def __init__(self, inp_feat:InpVecT, regul = 0.01,center = False):
+    def __init__(self, inp_feat:InpVecT, regul = 0.01, center = False):
+        out_feat = inp_feat
+        if len(inp_feat.reduce) > 0 and isinstance(inp_feat.reduce[-1], Prefactors):
+            matr = np.diag(inp_feat.reduce[-1].prefactors)
+            reduce = copy(inp_feat.reduce)
+            reduce[-1] = Prefactors(np.ones(len(inp_feat)))
+            out_feat = FiniteVec(inp_feat.k, inp_feat.inspace_points, reduce)
+        else:
+            matr = np.diag(np.ones(len(inp_feat))/ len(inp_feat))
         super().__init__(inp_feat,
-                         inp_feat.updated(np.ones(len(inp_feat),
-                         dtype = inp_feat.prefactors.dtype)),
-                         np.diag(inp_feat.prefactors),
+                         out_feat,
+                         matr,
                          mean_center_inp=center)
         self.inp_feat = self.outp_feat
         self._inv = None
@@ -176,16 +195,17 @@ class Cmo(FiniteMap[InpVecT, OutVecT]):
             matr = np.linalg.inv(G + regul * np.eye(len(inp_feat)))
         else:
             matr = regul_func(G)
-        super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center)
+        super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center, decenter_outp = center)
 
 class Cdo(FiniteMap[InpVecT, OutVecT]):
     """conditional density operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
-        super().__init__(inp_feat,
+        mo = Cmo(inp_feat, outp_feat, regul, center = center)
+        super().__init__(mo.inp_feat,
                          ref_feat,
-                         CovOp(ref_feat, regul).solve(Cmo(inp_feat, outp_feat, regul, center = center)).matr,
-                         mean_center_inp = center)
+                         CovOp(ref_feat, regul).solve(mo).matr,
+                         mean_center_inp = center, decenter_outp = False)
 
 
 class HsTo(FiniteMap[InpVecT, InpVecT]): 

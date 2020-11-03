@@ -1,6 +1,7 @@
 from copy import copy
+from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum
 from time import time
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, List
 
 import jax
 import jax.numpy as np
@@ -12,6 +13,7 @@ from jax.scipy.special import logsumexp
 from numpy.random import rand
 
 from jaxrk.reduce import Reduce, NoReduce
+from jaxrk.kern import Kernel
 
 from .base import Map, RkhsObject, Vec
 
@@ -27,51 +29,20 @@ class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
-    def __init__(self, kern, inspace_points, prefactors = None, points_per_split = None, center = False, undo_center = False):
+    def __init__(self, kern:Kernel, inspace_points, reduce:List[Reduce] = None):
         row_splits = None
         self.k = kern
         self.inspace_points = inspace_points
         assert(len(self.inspace_points.shape) == 2)
-        if prefactors is None:
-            if points_per_split is None:
-                prefactors = np.ones(len(inspace_points))/len(inspace_points)
-            else:
-                prefactors = np.ones(len(inspace_points))/points_per_split
-
-        assert(prefactors.shape[0] == len(inspace_points))
-        assert(len(prefactors.shape) == 1)
-        self.prngkey = jax.random.PRNGKey(np.int64(time()))
-        self.__reconstruction_kwargs = {"center" : center}
-
-        self.prefactors = prefactors
-        assert not (center and undo_center), "can't both center and undo center"
-        self.center = center
-        self.undo_center = undo_center
-
-
-        if (points_per_split is not None) or (row_splits is not None):
-            self.__reduce_gram__ = self.__reduce_balanced_ragged__
-            self.is_simple = False
-            if points_per_split is not None:
-                assert row_splits is None, "Either of points_per_split or row_splits can be set, but not both."
-                #balanced split: each feature vector element has and equal number of input space points
-                self.points_per_split = points_per_split
-                self.__len = len(self.inspace_points) // self.points_per_split
-                self.__reshape_gram__ = self.__reshape_balanced__
-                self.__getitem__ = self.__getitem_balanced__
-                self.normalized = self.__normalized_balanced__
-                self.__reconstruction_kwargs["points_per_split"] = points_per_split
-            else:
-                #ragged split: each feature vector element can be composed of a different number of input space points
-                self.row_splits = row_splits
-                self.__len = len(self.row_splits) - 1
-                self.__reshape_gram__ = self.__reshape_ragged__
-                self.normalized = self.__normalized_ragged__
-                self.__reconstruction_kwargs["row_splits"] = row_splits
-        else:
-            self.__reduce_gram__ = lambda gram, axis: gram
+        final_len = Reduce.final_len(len(inspace_points), reduce)
+        if reduce is None:
+            reduce = []# Prefactors(np.ones(final_len)/final_len)
             self.is_simple = True
-            self.__len = len(self.inspace_points)
+        self.reduce = reduce
+
+        self.__len = final_len
+        
+        self.prngkey = jax.random.PRNGKey(np.int64(time()))
         self._raw_gram_cache = None
 
     def __eq__(self, other):
@@ -85,31 +56,6 @@ class FiniteVec(Vec):
     
     def __neg__(self):
         self.updated(-self.prefactors)
-    
-    def __normalized_balanced__(self):
-        upd_pref = self.__reshape_balanced__(self.prefactors.reshape((-1, 1)))#.squeeze()
-        upd_pref = upd_pref / upd_pref.sum(1, keepdims=True)
-        return self.updated(upd_pref.reshape(self.prefactors.shape))
-
-    def __normalized_ragged__(self):
-        assert()
-
-    def __reshape_balanced__(self, gram):
-        return np.reshape(gram, (-1, self.points_per_split, gram.shape[-1]))
-    
-    def __reshape_ragged__(self, gram):
-        assert()
-        #return tf.RaggedTensor.from_row_splits(values=gram, row_splits=self.row_splits)
-    
-    def __reduce_balanced_ragged__(self, gram, axis):
-        perm = list(range(len(gram.shape)))
-        perm[0] = axis
-        perm[axis] = 0
-
-        gram = np.transpose(gram, perm)
-        gram = np.sum(self.__reshape_gram__(gram), axis = 1) 
-        gram =  np.transpose(gram, perm)
-        return gram
     
     def inner(self, Y=None, full=True):
         if not full and Y is not None:
@@ -127,7 +73,13 @@ class FiniteVec(Vec):
         return r2
     
     def normalized(self):
-        return self.updated(np.ones_like(self.prefactors))
+        r = self.reduce
+        if isinstance(r[-1], Prefactors):
+            p = r[-1].prefactors/np.sum(r[-1].prefactors)
+        else:
+            assert False
+            p = np.ones(len(self))/ len(self)
+        return self.updated(p)
     
     def __getitem__(self, index):
         return FiniteVec(self.k, self.inspace_points[index], self.prefactors[index])
@@ -140,29 +92,30 @@ class FiniteVec(Vec):
         raise NotImplementedError()
     
     def updated(self, prefactors):
-        assert(len(self.prefactors) == len(prefactors))
-        return FiniteVec(self.k, self.inspace_points, prefactors, **self.__reconstruction_kwargs)
-    
+        assert len(self) == len(prefactors)
+        _r = copy(self.reduce)
+        if isinstance(_r[-1], Prefactors):
+            _r = _r[:-1]
+        _r.append(Prefactors(prefactors))
+        return FiniteVec(self.k, self.inspace_points, _r)
+
     def centered(self):
-        kwargs = copy(self.__reconstruction_kwargs)
-        kwargs["center"] = True
-
-        return FiniteVec(self.k, self.inspace_points, self.prefactors, **kwargs)
-
-    def undo_center(self):
-        kwargs = copy(self.__reconstruction_kwargs)
-        kwargs["undo_center"] = True
-
-        return FiniteVec(self.k, self.inspace_points, self.prefactors, **kwargs)
+        return self.extend_reduce([Center()])
+        
+    def extend_reduce(self, r:List[Reduce]):
+        if r is None or len(r) == 0:
+            return self
+        else:
+            _r = copy(self.reduce)
+            _r.extend(r)
+            return FiniteVec(self.k, self.inspace_points, _r)
 
     def reduce_gram(self, gram, axis = 0):
-        gram = gram.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
-        gram = self.__reduce_gram__(gram, axis)
-        if self.center:
-            gram = gram - np.mean(gram, axis, keepdims = True)
-        elif self.undo_center:
-            gram = gram - np.mean(gram, axis, keepdims = True)
-        return gram
+        carry = gram
+        if self.reduce is not None:
+            for gr in self.reduce:
+                carry = gr(carry, axis)
+        return carry
     
     def get_mean_var(self, keepdims = False):
         mean = self.reduce_gram(self.inspace_points, 0)
@@ -175,12 +128,13 @@ class FiniteVec(Vec):
             return (np.squeeze(mean), np.squeeze(var))
     
     def sum(self,):
-        #FIXME: this should respect gram_reduce!
-        return FiniteVec(self.k, self.inspace_points, self.prefactors, points_per_split = len(self.inspace_points))
+        reduce = copy(self.reduce)
+        reduce.append(Sum)
+        return FiniteVec(self.k, self.inspace_points, reduce)
     
     @classmethod
     def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None):
-        return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
+        return cls(kern, inspace_points, [Prefactors(prefactors), BalancedSum(len(inspace_points))])
     
     @classmethod
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1) -> "FiniteVec":
@@ -297,15 +251,19 @@ V1T = TypeVar("V1T", bound=Vec)
 V2T = TypeVar("V2T", bound=Vec)
 
 class CombVec(Vec, Generic[V1T, V2T]):
-    def __init__(self, v1:V1T, v2:V2T, operation, gram_reduce:Reduce = NoReduce()):
+    def __init__(self, v1:V1T, v2:V2T, operation, reduce:List[Reduce] = None):
         assert(len(v1) == len(v2))
         self.__len = len(v1)
         (self.v1, self.v2) = (v1, v2)
         self.combine = operation
-        self._gram_reduce = gram_reduce
+        self._reduce = reduce
     
     def reduce_gram(self, gram, axis = 0):
-        return self._gram_reduce(gram, axis)
+        carry = gram
+        if self._reduce is not None:
+            for gr in self._reduce:
+                carry = gr(carry, axis)
+        return carry
 
     def inner(self, Y:"CombVec[V1T, V2T]"=None, full=True):
         if Y is None:
@@ -315,10 +273,10 @@ class CombVec(Vec, Generic[V1T, V2T]):
         return self.reduce_gram(Y.reduce_gram(self.combine(self.v1.inner(Y.v1), self.v2.inner(Y.v2)), 1), 0)
 
     def __len__(self):
-        if self._gram_reduce is None:
+        if self._reduce is None:
             return self.__len
         else:
-            return self._gram_reduce.new_len(self.__len)
+            return self._reduce.new_len(self.__len)
 
     def updated(self, prefactors):
         raise NotImplementedError()
