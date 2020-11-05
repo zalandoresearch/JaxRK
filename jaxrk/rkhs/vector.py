@@ -1,5 +1,6 @@
 from copy import copy
-from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum
+from jaxrk.reduce.lincomb import LinearReduce
+from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
 from time import time
 from typing import Generic, TypeVar, List
 
@@ -72,14 +73,18 @@ class FiniteVec(Vec):
         r2 = Y.reduce_gram(r1, axis = 1)
         return r2
     
-    def normalized(self):
+    def normalized(self) -> "FiniteVec":
         r = self.reduce
         if isinstance(r[-1], Prefactors):
             p = r[-1].prefactors/np.sum(r[-1].prefactors)
+            return self.updated(p)
+        elif isinstance(r[-1], LinearReduce):
+            p = r[-1].linear_map/np.sum(r[-1].linear_map, 1, keepdims=True)
+            return FiniteVec(self.k, self.inspace_points, self.reduce[:-1]).extend_reduce([LinearReduce(p)])
         else:
             assert False
             p = np.ones(len(self))/ len(self)
-        return self.updated(p)
+        
     
     def __getitem__(self, index):
         return FiniteVec(self.k, self.inspace_points[index], self.prefactors[index])
@@ -91,18 +96,18 @@ class FiniteVec(Vec):
     def __getitem_ragged__(self, index):
         raise NotImplementedError()
     
-    def updated(self, prefactors):
+    def updated(self, prefactors) -> "FiniteVec":
         assert len(self) == len(prefactors)
         _r = copy(self.reduce)
-        if isinstance(_r[-1], Prefactors):
+        if len(_r) > 0 and isinstance(_r[-1], Prefactors):
             _r = _r[:-1]
         _r.append(Prefactors(prefactors))
         return FiniteVec(self.k, self.inspace_points, _r)
 
-    def centered(self):
+    def centered(self) -> "FiniteVec":
         return self.extend_reduce([Center()])
-        
-    def extend_reduce(self, r:List[Reduce]):
+
+    def extend_reduce(self, r:List[Reduce]) -> "FiniteVec":
         if r is None or len(r) == 0:
             return self
         else:
@@ -111,13 +116,14 @@ class FiniteVec(Vec):
             return FiniteVec(self.k, self.inspace_points, _r)
 
     def reduce_gram(self, gram, axis = 0):
-        carry = gram
-        if self.reduce is not None:
-            for gr in self.reduce:
-                carry = gr(carry, axis)
-        return carry
+        return Reduce.apply(gram, self.reduce, axis) 
     
-    def get_mean_var(self, keepdims = False):
+    def nsamps(self, mean = False) -> np.ndarray:
+        n = len(self.inspace_points)
+        rval = Reduce.apply(np.ones(n)[:, None] * n, self.reduce, 0) 
+        return rval.mean() if mean else rval
+    
+    def get_mean_var(self, keepdims = False) -> np.ndarray:
         mean = self.reduce_gram(self.inspace_points, 0)
         variance_of_expectations = self.reduce_gram(self.inspace_points**2, 0) - mean**2
         var = self.k.var + variance_of_expectations
@@ -127,13 +133,14 @@ class FiniteVec(Vec):
         else:
             return (np.squeeze(mean), np.squeeze(var))
     
-    def sum(self,):
-        reduce = copy(self.reduce)
-        reduce.append(Sum)
-        return FiniteVec(self.k, self.inspace_points, reduce)
+    def sum(self,) -> "FiniteVec":
+        return self.extend_reduce([Sum()])
+    
+    def mean(self,) -> "FiniteVec":
+        return self.extend_reduce([Mean()])
     
     @classmethod
-    def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None):
+    def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None) -> "FiniteVec":
         return cls(kern, inspace_points, [Prefactors(prefactors), BalancedSum(len(inspace_points))])
     
     @classmethod
@@ -208,7 +215,7 @@ class FiniteVec(Vec):
 
     
     def __call__(self, argument):
-        return inner(self, FiniteVec(self.k, argument, np.ones(len(argument))))
+        return inner(self, FiniteVec(self.k, argument, []))
 
 def choose_representer(support_points, factors, kernel):
     return choose_representer_from_gram(kernel(support_points).astype(np.float64), factors)

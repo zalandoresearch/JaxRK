@@ -42,8 +42,8 @@ class FiniteMap(Map[InpVecT, OutVecT]):
         return len(self.inp_feat)
 
     def _corrected_gram(self, input:InpVecT):
-        inp_gram = inner(self.inp_feat, input) + self.const_cent_term
-        return inp_gram
+        #inp_gram = inner(self.inp_feat, input) + self.const_cent_term
+        return inner(self.inp_feat, input) #inp_gram
 
     def __matmul__(self, inp:CombT) -> RkhsObject:
         if isinstance(inp, FiniteMap):
@@ -85,18 +85,20 @@ class CrossCovOp(FiniteMap[InpVecT, OutVecT]):
 
 class CovOp(FiniteMap[InpVecT, InpVecT]):
     def __init__(self, inp_feat:InpVecT, regul = 0.01, center = False):
+        if center:
+            inp_feat = inp_feat.centered()
         out_feat = inp_feat
-        if len(inp_feat.reduce) > 0 and isinstance(inp_feat.reduce[-1], Prefactors):
-            matr = np.diag(inp_feat.reduce[-1].prefactors)
-            reduce = copy(inp_feat.reduce)
-            reduce[-1] = Prefactors(np.ones(len(inp_feat)))
-            out_feat = FiniteVec(inp_feat.k, inp_feat.inspace_points, reduce)
-        else:
-            matr = np.diag(np.ones(len(inp_feat))/ len(inp_feat))
+        # if len(inp_feat.reduce) > 0 and isinstance(inp_feat.reduce[-1], Prefactors):
+        #     matr = np.diag(inp_feat.reduce[-1].prefactors)
+        #     reduce = copy(inp_feat.reduce)
+        #     reduce[-1] = Prefactors(np.ones(len(inp_feat)))
+        #     out_feat = FiniteVec(inp_feat.k, inp_feat.inspace_points, reduce)
+        # else:
+        #     matr = np.diag(np.ones(len(inp_feat)))
         super().__init__(inp_feat,
                          out_feat,
-                         matr,
-                         mean_center_inp=center)
+        #                 matr,
+                         np.eye(len(inp_feat)))
         self.inp_feat = self.outp_feat
         self._inv = None
         self.regul = regul
@@ -142,16 +144,19 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
             CovOp[InpVecT, InpVecT]: The inverse operator
         """
         set_inv = False
+        rval = self._inv
+
         if regul is None:
             set_inv = True
-            regul = self.regul
-
-        if self._inv is None:
+            regul = self.regul        
+        print("regul=", regul)
+        if self._inv is None or set_inv:
             inv_gram = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(self.inp_feat), dtype = self.matr.dtype))
             matr = (self.matr @ self.matr @ inv_gram @ inv_gram)
             rval = CovOp(self.inp_feat, regul)
             rval.matr = matr
             rval._inv = self
+            
         if set_inv:
             self._inv = rval
         return rval
@@ -169,15 +174,15 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
         """
         
         if isinstance(inp, FiniteMap):
-            regul = CovOp.regul(len(inp.outp_feat), 1./np.mean(np.diag(self.matr)))
+            reg_inp = inp.outp_feat
         else:
             if isinstance(inp, DeviceArray):
                 inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
-            assert(len(inp) == 1)
-            #regul = CovOp.regul(1./np.mean(embedding.prefactors), 1./np.mean(np.diag(self.matr)))
-            regul = CovOp.regul(len(inp), 1./np.mean(np.diag(self.matr)))
-        
-        return self.inv(regul) @ inp
+            #assert(len(inp) == 1)
+            reg_inp = inp
+
+        regul = CovOp.regul(max(reg_inp.nsamps().min(), 1), max(self.inp_feat.nsamps(True), 1))
+        return (self.inv(regul) @ inp)
 
         
 
@@ -202,9 +207,10 @@ class Cdo(FiniteMap[InpVecT, OutVecT]):
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
         mo = Cmo(inp_feat, outp_feat, regul, center = center)
+        matr = CovOp(ref_feat, regul).solve(mo).matr
         super().__init__(mo.inp_feat,
                          ref_feat,
-                         CovOp(ref_feat, regul).solve(mo).matr,
+                         matr,
                          mean_center_inp = center, decenter_outp = False)
 
 

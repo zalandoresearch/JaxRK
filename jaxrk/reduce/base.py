@@ -37,7 +37,7 @@ class Reduce(Callable, ABC):
         carry = np.swapaxes(inp, axis, 0)
         if reduce is not None:
             for gr in reduce:
-                carry = gr.reduce_first_ax(carry, axis)
+                carry = gr.reduce_first_ax(carry)
         return np.swapaxes(carry, axis, 0)
     
     @classmethod
@@ -74,11 +74,18 @@ class Prefactors(Reduce):
         return original_len
 
 class Sum(Reduce):
-    def __init__(self) -> None:
-        assert len(pref.shape) == 1
-
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         return inp.sum(axis = axis, keepdims = True)
+
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        return self.__call__(inp, 0)
+    
+    def new_len(self, original_len:int) -> int:
+        return 1
+
+class Mean(Reduce):
+    def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+        return inp.mean(axis = axis, keepdims = True)
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
         return self.__call__(inp, 0)
