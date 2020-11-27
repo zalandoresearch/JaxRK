@@ -24,46 +24,64 @@ CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT, np.array)
 class FiniteMap(Map[InpVecT, OutVecT]):
     """Finite rank affine map in RKHS
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False, decenter_outp:bool = False):
-        
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False, decenter_outp:bool = False, normalize = False, outp_bias:np.array = None):
+        assert not (decenter_outp and outp_bias is not None), "Either decenter_outp == True or outp_bias != None, but not both"
         self.matr = matr
-        self.const_cent_term = 0
         self.mean_center_inp = mean_center_inp
-        self.decenter_outp = decenter_outp
+
         if not mean_center_inp:
             self.inp_feat = inp_feat
             self.outp_feat = outp_feat
         else:
             self.inp_feat = inp_feat.extend_reduce([CenterInpFeat(inp_feat.inner())])
             self.outp_feat = outp_feat
+        self._normalize = normalize
 
+        self.debias_outp = decenter_outp
+        if decenter_outp:            
+            outp_bias = np.ones((1, len(outp_feat)) ) / len(outp_feat)
+        else:
+            outp_bias = np.zeros((1, len(outp_feat)))
+
+        if outp_bias is not None:
+            assert outp_bias.shape[1] == len(outp_feat)
+            if len(outp_bias.squeeze().shape) == 1:
+                self.bias = outp_bias.squeeze()[np.newaxis, :]
+            else:
+                assert outp_bias.shape[0]  == len(outp_feat) 
+                self.bias = outp_bias
     
     def __len__(self):
         return len(self.inp_feat)
 
-    def _corrected_gram(self, input:InpVecT):
-        #inp_gram = inner(self.inp_feat, input) + self.const_cent_term
-        return inner(self.inp_feat, input) #inp_gram
-
     def __matmul__(self, inp:CombT) -> RkhsObject:
         if isinstance(inp, FiniteMap):
-            rval = FiniteMap(inp.inp_feat, self.outp_feat, self.matr @ self._corrected_gram(inp.outp_feat) @ inp.matr, mean_center_inp = inp.mean_center_inp)
-            rval.const_cent_term = inp.const_cent_term
+            G = inner(self.inp_feat, inp.outp_feat)
+            
+            if not inp.debias_outp:
+                matr = self.matr @ G @ inp.matr
+                inp_bias = (matr @ inp.bias.T).T
+            else:
+                matr = self.matr @ (G - G @ inp.bias.T) @ inp.matr
+                inp_bias = (self.matr @ G @ inp.bias.T).T
+
+            rval = FiniteMap(inp.inp_feat, self.outp_feat, matr, outp_bias=self.bias + inp_bias)
+            rval.mean_center_inp = inp.mean_center_inp
             return rval
         else:
             if isinstance(inp, DeviceArray):
                 inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))  
-            lin_map = (self.matr @ self._corrected_gram(inp)).T
-            
-            
-            if self.decenter_outp:
+            lin_map = (self.matr @ inner(self.inp_feat, inp)).T
+            if self.debias_outp:
                 r = [DecenterOutFeat(lin_map)]
             else:
-                lin_map = lin_map / lin_map.sum(1, keepdims = True)
-                r = [LinearReduce(lin_map)]
+                if self._normalize:
+                    lin_map = lin_map / lin_map.sum(1, keepdims = True)
+                r = [LinearReduce(lin_map + self.bias)]
             if len(inp) == 1:
                 r.append(Sum())
-            return self.outp_feat.extend_reduce(r)
+            rval = self.outp_feat.extend_reduce(r)
+            return rval
 
     def __call__(self, inp:DeviceArray) -> RkhsObject:
         return self @ FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
@@ -109,7 +127,7 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
     
     @classmethod
     def regul(cls, nsamps:int, nrefsamps:int = None, a:float = 0.49999999999999, b:float = 0.49999999999999, c:float = 0.1):
-        """Compute the regularizer based on the formula from the Kernel Conditional Density operators paper(Corollary 3.4, 2020).
+        """Compute the regularizer based on the formula from the Kernel Conditional Density operators paper (Schuster et al., 2020, Corollary 3.4).
         
         smaller c => larger bias, tighter stochastic error bounds
         bigger  c =>  small bias, looser stochastic error bounds
@@ -184,6 +202,12 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
         regul = CovOp.regul(max(reg_inp.nsamps().min(), 1), max(self.inp_feat.nsamps(True), 1))
         return (self.inv(regul) @ inp)
 
+    def eig(self) -> FiniteVec:
+        G = self.inp_feat.inner()
+        np.linalg.eigh(self.matr @ G + np.eye(G.shape[0])/1000 )
+        
+    
+
         
 
 class Cmo(FiniteMap[InpVecT, OutVecT]):
@@ -206,18 +230,20 @@ class Cdo(FiniteMap[InpVecT, OutVecT]):
     """conditional density operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
+        #if center:
+        #    outp_feat = outp_feat.extend_reduce([DecenterOutFeat(np.eye(len(outp_feat)))])
         mo = Cmo(inp_feat, outp_feat, regul, center = center)
         matr = CovOp(ref_feat, regul).solve(mo).matr
         super().__init__(mo.inp_feat,
                          ref_feat,
                          matr,
-                         mean_center_inp = center, decenter_outp = False)
+                         mean_center_inp = center, decenter_outp = False, normalize=True)
 
 
 class HsTo(FiniteMap[InpVecT, InpVecT]): 
     """RKHS transfer operators
     """
-    def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = False, koopman = False):
+    def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = True, koopman = False):
         self.embedded = embedded
         self.koopman = koopman
         assert(start_feat.k == timelagged_feat.k)

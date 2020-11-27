@@ -24,50 +24,12 @@ from .base import Reduce
 ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
 
 class SparseReduce(Reduce):
-    def __init__(self, idcs:List[np.array], average:bool = True):
-        """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
-
-        Args:
-            idcs (List[np.array]): The indices of the rows to copy in the desired order
-            average (bool): wether or not to average
-        """
-        super().__init__()
-        self.idcs = idcs
-        self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
-        if average:
-            self._reduce = np.mean
-        else:
-            self._reduce = np.sum
-    
-
-    
-    def reduce_first_ax(self, inp:np.array) -> np.array:
-        assert (self.max_idx + 1) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
-        assert len(inp.shape) == 2
-        #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
-        rval = np.zeros((len(self.idcs), inp.shape[1]))
-        for i, idx in enumerate(self.idcs):
-            rval = rval.at[i].set(self._reduce(inp[idx, :], 0))
-        return rval
-    
-    def new_len(self, original_len:int):
-        assert (self.max_idx + 1) <= original_len, self.__class__.__name__ + " expects a longer gram to operate on"
-        return len(self.idcs)
-    
-    
-    @classmethod
-    def sum_from_unique(cls, input:np.array, mean:bool = True) -> Tuple[np.array, np.array, "SparseReduce"]:        
-        un, cts = np.unique(input, return_counts=True)
-        un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
-        return un, cts, SparseReduce(un_idx, mean)
-
-class SparseBlockReduce(Reduce):
-    def __init__(self, idcs:List[np.array], block_boundaries:np.array, average:bool = True):
+    def __init__(self, idcs:List[np.array], #block_boundaries:np.array,
+                       average:bool = True):
         """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
 
         Args:
             idcs (List[np.array]): The indices of the rows to copy in the desired order. Each list element contains 2d Arrays.
-            block_boundaries (np.array): Boundaries of index blocks
             average (bool): wether or not to average
         """
         super().__init__()
@@ -77,19 +39,14 @@ class SparseBlockReduce(Reduce):
             self._reduce = np.mean
         else:
             self._reduce = np.sum
-        self.result_len = np.sum([len(e) for e in idcs])
-        self.block_boundaries = block_boundaries
 
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def reduce_first_ax(self, inp:np.array) -> np.array:
         assert (self.max_idx + 1) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
         assert len(inp.shape) == 2
-        #return map(lambda idx: self._reduce(gram[idx]), self.idcs)
         rval = []
 
-        for i in range(len(self.block_boundaries) - 1):
-            start = self.block_boundaries[i]
-            end = self.block_boundaries[i+1]
+        for i in range(len(self.idcs)):
             reduced = self._reduce(inp[list(self.idcs[i].flatten()),:].reshape((-1, self.idcs[i].shape[1], inp.shape[1])), 1)
             rval.append(reduced)
         return np.concatenate(rval, 0)
@@ -100,7 +57,7 @@ class SparseBlockReduce(Reduce):
     
     
     @classmethod
-    def sum_from_unique(cls, input:np.array, mean:bool = True) -> Tuple[np.array, np.array, "SparseBlockReduce"]:        
+    def sum_from_unique(cls, input:np.array, mean:bool = True) -> Tuple[np.array, np.array, "SparseReduce"]:        
         un, cts = np.unique(input, return_counts = True)
         un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
         l_arr = np.array([i.size for i in un_idx])
@@ -118,8 +75,50 @@ class SparseBlockReduce(Reduce):
         for i in range(len(change) - 1):
             el.append(np.array([un_idx_sorted[j] for j in range(change[i], change[i+1])]))
 
-        return un_sorted, cts_sorted, SparseBlockReduce(el, change, mean)
+        #assert False
+        return un_sorted, cts_sorted, SparseReduce(el, mean)
 
+class BlockReduce(Reduce):
+    def __init__(self, block_boundaries:np.array,
+                       average:bool = True):
+        """BlockReduce constructs a larger Gram matrix by copying indices of a smaller one
+
+        Args:
+            block_boundaries (np.array): Boundaries of blocks
+            average (bool): wether or not to average
+        """
+        super().__init__()
+        if average:
+            self._reduce = np.mean
+        else:
+            self._reduce = np.sum
+        self.block_boundaries = block_boundaries
+
+    #@partial(jit, static_argnums=(0,))
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        assert (self.block_boundaries[-1]) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
+        assert len(inp.shape) == 2
+        rval = []
+
+        for i in range(len(self.block_boundaries) - 1):
+            start = self.block_boundaries[i]
+            end = self.block_boundaries[i+1]
+            reduced = self._reduce(inp[start:end,:], 0)
+            rval.append(reduced)
+        return np.concatenate(rval, 0)
+    
+    def new_len(self, original_len:int):
+        return self.block_boundaries[-1]
+    
+    
+    @classmethod
+    def sum_from_block(cls, input:np.array, mean:bool = True) -> "BlockReduce":
+        change = list(np.argwhere(input[:-1] - input[1:] != 0).flatten() + 1)
+        change.insert(0, 0) 
+        change.append(len(input))
+        change = np.array(change)
+
+        return BlockReduce(change, mean)
 
 class LinearReduce(Reduce):
     def __init__(self, linear_map:np.array):

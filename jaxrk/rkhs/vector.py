@@ -1,4 +1,6 @@
 from copy import copy
+
+from numpy.core.fromnumeric import squeeze
 from jaxrk.reduce.lincomb import LinearReduce
 from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
 from time import time
@@ -47,8 +49,8 @@ class FiniteVec(Vec):
         self._raw_gram_cache = None
 
     def __eq__(self, other):
+        assert False, "not yet implemented checking equality of reduce"
         return (isinstance(other, self.__class__) and
-                np.all(other.prefactors == self.prefactors) and
                 np.all(other.inspace_points == self.inspace_points) and
                 other.k == self.k)
 
@@ -80,7 +82,8 @@ class FiniteVec(Vec):
             return self.updated(p)
         elif isinstance(r[-1], LinearReduce):
             p = r[-1].linear_map/np.sum(r[-1].linear_map, 1, keepdims=True)
-            return FiniteVec(self.k, self.inspace_points, self.reduce[:-1]).extend_reduce([LinearReduce(p)])
+            return self.updated(p)
+            #return FiniteVec(self.k, self.inspace_points, self.reduce[:-1]).extend_reduce([LinearReduce(p)])
         else:
             assert False
             p = np.ones(len(self))/ len(self)
@@ -97,11 +100,16 @@ class FiniteVec(Vec):
         raise NotImplementedError()
     
     def updated(self, prefactors) -> "FiniteVec":
-        assert len(self) == len(prefactors)
         _r = copy(self.reduce)
-        if len(_r) > 0 and isinstance(_r[-1], Prefactors):
+        if len(_r) > 0 and (isinstance(_r[-1], Prefactors) or isinstance(_r[-1], LinearReduce)): 
+            assert Reduce.final_len(len(self.inspace_points), _r) == prefactors.shape[0]
             _r = _r[:-1]
-        _r.append(Prefactors(prefactors))
+        
+        if len(prefactors.shape) == 1:            
+            _r.append(Prefactors(prefactors))
+        elif len(prefactors.shape) == 2:
+            assert len(self) == prefactors.shape[0]
+            _r.append(LinearReduce(prefactors))
         return FiniteVec(self.k, self.inspace_points, _r)
 
     def centered(self) -> "FiniteVec":
@@ -133,15 +141,19 @@ class FiniteVec(Vec):
         else:
             return (np.squeeze(mean), np.squeeze(var))
     
-    def sum(self,) -> "FiniteVec":
-        return self.extend_reduce([Sum()])
+    def sum(self, use_linear_reduce = False) -> "FiniteVec":
+        if use_linear_reduce:
+            return self.extend_reduce([LinearReduce(np.ones((1, len(self))))])
+        else:
+            return self.extend_reduce([Sum()])
     
     def mean(self,) -> "FiniteVec":
         return self.extend_reduce([Mean()])
     
     @classmethod
     def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None) -> "FiniteVec":
-        return cls(kern, inspace_points, [Prefactors(prefactors), BalancedSum(len(inspace_points))])
+        assert len(prefactors.squeeze().shape) == 1
+        return cls(kern, inspace_points, [LinearReduce(prefactors.squeeze()[None, :])])
     
     @classmethod
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1) -> "FiniteVec":
@@ -149,18 +161,25 @@ class FiniteVec(Vec):
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     def point_representant(self, method = "inspace_point"):
-        
+        if isinstance(self.reduce[-1], LinearReduce):
+            pref = self.normalized().reduce[-1].linear_map.squeeze()
+        else:
+            pref = self.normalized().reduce[-1].prefactors.squeeze()
         if method == "inspace_point":
+            assert isinstance(self.reduce[-1], Prefactors) or isinstance(self.reduce[-1], LinearReduce)
+            
             n = self.normalized()
             if self._raw_gram_cache is None:
                 self._raw_gram_cache = n.k(n.inspace_points).astype(np.float64)
-            repr_idx = choose_representer_from_gram(self._raw_gram_cache, n.prefactors.flatten())
-            return n.inspace_points[repr_idx]
+            G_repr_orig = Reduce.apply(self._raw_gram_cache, self.reduce, 1)
+            repr_idx = gram_projection(G_repr_orig, self._raw_gram_cache, Reduce.apply(G_repr_orig, self.reduce, 0)).squeeze()
+            #assert False
+            return n.inspace_points[repr_idx,:]
         elif method == "mean":
             return np.atleast_1d([self.get_mean_var()[0]])
         else:
             n = self.dens_proj()
-            return n.inspace_points[jax.random.categorical(self.prngkey, log(n.prefactors.flatten())), :]
+            return n.inspace_points[jax.random.categorical(self.prngkey, log(pref.flatten())), :]
     
     def pos_proj(self, nsamps:int = None) -> "FiniteVec":
         """Project to RKHS element with purely positive prefactors. Assumes `len(self) == 1`.
@@ -227,6 +246,42 @@ def choose_representer_from_gram(G, factors):
     assert rval < rkhs_distances_sq.size
     return rval
 
+def gram_projection(G_repr_orig:np.array, G_repr:np.array=None, G_orig:np.array=None, method:str = "representer"):
+    
+    assert len(G_orig.shape) == 2 and len(G_repr_orig.shape)==2
+    if G_repr is not None:
+        assert len(G_repr.shape) == 2 and G_repr.shape[0] == G_repr.shape[1] and G_repr_orig.shape[0] == G_repr.shape[0]
+        assert G_repr.shape[1] % G_repr_orig.shape[1] == 0, "Shapes of Gram matrices do not broadcast"
+    if G_orig is not None:
+        assert G_orig.shape[0] == G_orig.shape[1] and G_repr_orig.shape[1] == G_orig.shape[1]
+        assert  G_orig.shape[0] % G_repr_orig.shape[0] == 0, "Shapes of Gram matrices do not broadcast"
+    if method == "representer":
+        if G_repr == None or G_orig == None:
+            assert G_repr == None and G_orig == None, 'If method == "representer", either none or both of G_repr, G_orig should be None'
+            assert np.all(G_repr_orig == G_repr_orig.T)
+            G_repr = G_orig = G_repr_orig
+        else:
+            assert G_repr.shape == G_orig.shape and G_repr_orig.shape == G_repr.shape
+        return np.argmin(G_orig + G_repr - 2*G_repr_orig, axis=0)
+    elif method == "pos_proj":
+        assert G_repr is not None
+        s = G_repr_orig.T.shape
+        tr_orig = np.trace(G_orig)
+        def cost(M):
+            M = M.reshape(s)
+            return np.trace(M @ ((G_repr@ M.T) - 2*G_repr_orig))
+        res = osp.optimize.minimize(__casted_output(cost),
+                               rand(np.prod(s))+ 0.0001,
+                               jac = __casted_output(grad(cost)),
+                               bounds = [(0., None)] * len(factors))
+        return res["x"]
+    else:
+        assert False, "No valid method selected"
+        
+
+
+
+
 def pos_proj(support_points, factors, kernel):
     G = kernel(support_points).astype(np.float64)
     c = 2*np.dot(factors, G)
@@ -258,9 +313,9 @@ V1T = TypeVar("V1T", bound=Vec)
 V2T = TypeVar("V2T", bound=Vec)
 
 class CombVec(Vec, Generic[V1T, V2T]):
-    def __init__(self, v1:V1T, v2:V2T, operation, reduce:List[Reduce] = None):
+    def __init__(self, v1:V1T, v2:V2T, operation, reduce:List[Reduce] = []):
         assert(len(v1) == len(v2))
-        self.__len = len(v1)
+        self.__len = Reduce.final_len(len(v1), reduce)
         (self.v1, self.v2) = (v1, v2)
         self.combine = operation
         self._reduce = reduce
@@ -278,12 +333,24 @@ class CombVec(Vec, Generic[V1T, V2T]):
         else:
             assert(Y.combine == self.combine)
         return self.reduce_gram(Y.reduce_gram(self.combine(self.v1.inner(Y.v1), self.v2.inner(Y.v2)), 1), 0)
+    
+    def extend_reduce(self, r:List[Reduce]) -> "CombVec":
+        if r is None or len(r) == 0:
+            return self
+        else:
+            _r = copy(self._reduce)
+            _r.extend(r)
+            return CombVec(self.v1, self.v2, self.combine, _r)
+
+    def centered(self) -> "CombVec":
+        return self.extend_reduce([Center()])
+ 
 
     def __len__(self):
         if self._reduce is None:
-            return self.__len
+            return len(self.v1)
         else:
-            return self._reduce.new_len(self.__len)
+            return self.__len
 
     def updated(self, prefactors):
         raise NotImplementedError()

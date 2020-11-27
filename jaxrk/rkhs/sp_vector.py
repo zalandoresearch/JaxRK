@@ -1,4 +1,6 @@
-from typing import Union, Iterable, Iterator
+import copy
+from jaxrk.reduce.base import Center
+from typing import List, Union, Iterable, Iterator
 
 import jax.numpy as np
 from jax import jit, lax, vmap
@@ -47,12 +49,12 @@ class SpVec(Vec):
 
         if not use_subtrajectories:
             self.__reduce_sum_func = lambda x: np.mean(x, axis = 0, keepdims = True)
-            self.__len = len(self.process_boundaries[:-1])
+            self.__len = Reduce.final_len(len(self.process_boundaries[:-1]), reduce)
         else:
             def reduce_func(x):
                     return np.cumsum(x, axis = 0) / np.arange(1, x.shape[0] + 1).reshape((-1, 1))
             self.__reduce_sum_func = reduce_func
-            self.__len = self.process_boundaries[-1]
+            self.__len = Reduce.final_len(self.process_boundaries[-1], reduce)
         self._reduce = reduce
 
 
@@ -65,10 +67,7 @@ class SpVec(Vec):
                 self._reduce == other._reduce )
 
     def __len__(self):
-        if self._reduce is None:
-            return self.__len
-        else:
-            return self._reduce.new_len(self.__len)
+        return self.__len
 
     def _inner_raw(self, Y=None, full=True):
         if not full and Y is not None:
@@ -117,7 +116,18 @@ class SpVec(Vec):
         return r2
     
     def updated(self, prefactors):
-       raise(NotImplementedError)
+        raise(NotImplementedError)
+    
+    def extend_reduce(self, r:List[Reduce]) -> "SpVec":
+        if r is None or len(r) == 0:
+            return self
+        else:
+            _r = copy(self._reduce)
+            _r.extend(r)
+            return SpVec(self.k, self.inspace_points, self.process_boundaries, self.use_subtrajectories, self.use_inner, _r)
+
+    def centered(self) -> "SpVec":
+        return self.extend_reduce([Center()])
  
     def _raw_reduce_gram(self, gram, axis = 0):
         if axis != 0:
@@ -215,7 +225,7 @@ class RolloutSp(object):
 
         if cm_op.inp_feat.__class__ == CombVec:
             self.uinner = UpdatableSpVecInner(self._cmo.inp_feat.v1, initial_spvec)
-            self.current_outp_emb = self._cmo.outp_feat.sum()
+            self.current_outp_emb = self._cmo.outp_feat.sum(True)
             self.get_embedding = self.__get_embedding_CombVec
             self.__update_current_outp_emb = lambda : None
         else:
@@ -250,5 +260,5 @@ class RolloutSp(object):
         inp_gram = self._cmo.inp_feat.combine(self.uinner.current_gram, idx_gram)
         inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram[:, np.newaxis], 0).squeeze()
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
-        return self.current_outp_emb.updated(self._cmo.matr @ inp_gram)
+        return self.current_outp_emb.updated((self._cmo.matr @ inp_gram).T)
 

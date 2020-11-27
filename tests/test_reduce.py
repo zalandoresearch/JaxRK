@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 
 
 from jaxrk.rkhs import FiniteVec, inner, SpVec
-from jaxrk.reduce import SparseReduce, SparseBlockReduce, LinearReduce
+from jaxrk.reduce import SparseReduce, SparseReduce, LinearReduce, BlockReduce
 
 rng = np.random.RandomState(1)
 
@@ -16,9 +16,9 @@ rng = np.random.RandomState(1)
 
 def test_SparseReduce():
     gram = rng.randn(4, 3)
-    r = SparseReduce([ np.array([0, 1]),
-                       np.array([0, 3]),
-                       np.array([0, 2]) ],
+    r = SparseReduce([ np.array([[0, 1]]),
+                       np.array([[0, 3]]),
+                       np.array([[0, 2]]) ],
                      True) 
     rgr = r(gram, 0)
     assert np.allclose(rgr[0], (gram[0] + gram[1]) / 2) 
@@ -28,14 +28,14 @@ def test_SparseReduce():
 def test_reduce_from_unique():
   inp = np.array([1,1,0,3,5,0])
   un1, cts1, red1 = SparseReduce.sum_from_unique(inp)
-  un2, cts2, red2 = SparseBlockReduce.sum_from_unique(inp)
+  #red2 = BlockReduce.sum_from_block(inp)
   un3, cts3, red3 = LinearReduce.sum_from_unique(inp)
   
-  args = np.argsort(un2)
+  args = np.argsort(un1)
 
   i_out = np.outer(inp, inp)
-  assert np.all(red1.reduce_first_ax(i_out) == red2.reduce_first_ax(i_out)[args, :])
-  assert np.all(red1.reduce_first_ax(i_out) == red3.reduce_first_ax(i_out))
+  #assert np.all(red1.reduce_first_ax(i_out) == red2.reduce_first_ax(i_out)[args, :])
+  assert np.all(red1.reduce_first_ax(i_out) == red3.reduce_first_ax(i_out)[args, :])
 
 def test_LinearReduce():
     gram = rng.randn(4, 3)
