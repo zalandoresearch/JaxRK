@@ -17,6 +17,7 @@ from numpy.random import rand
 
 from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.kern import Kernel
+from jaxrk.utilities.rkhsdist import rkhs_cdist, rkhs_cdist_ignore_const
 
 from .base import Map, RkhsObject, Vec
 
@@ -160,26 +161,26 @@ class FiniteVec(Vec):
         prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
         return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
-    def point_representant(self, method = "inspace_point"):
-        if isinstance(self.reduce[-1], LinearReduce):
-            pref = self.normalized().reduce[-1].linear_map.squeeze()
-        else:
-            pref = self.normalized().reduce[-1].prefactors.squeeze()
+    @property
+    def _raw_gram(self):
+        if self._raw_gram_cache is None:
+            self._raw_gram_cache = self.k(self.inspace_points).astype(np.float64)
+        return self._raw_gram_cache
+    
+    def point_representant(self, method:str = "inspace_point", keepdims:bool=False):
         if method == "inspace_point":
             assert isinstance(self.reduce[-1], Prefactors) or isinstance(self.reduce[-1], LinearReduce)
-            
-            n = self.normalized()
-            if self._raw_gram_cache is None:
-                self._raw_gram_cache = n.k(n.inspace_points).astype(np.float64)
-            G_repr_orig = Reduce.apply(self._raw_gram_cache, self.reduce, 1)
-            repr_idx = gram_projection(G_repr_orig, self._raw_gram_cache, Reduce.apply(G_repr_orig, self.reduce, 0)).squeeze()
-            #assert False
-            return n.inspace_points[repr_idx,:]
+            G_orig_repr = Reduce.apply(self._raw_gram, self.reduce, 1)
+            repr_idx = gram_projection(G_orig_repr, Reduce.apply(G_orig_repr, self.reduce, 0), self._raw_gram, method = "representer").squeeze()
+            rval = self.inspace_points[repr_idx,:]
         elif method == "mean":
-            return np.atleast_1d([self.get_mean_var()[0]])
+            rval = self.get_mean_var(keepdims=keepdims)[0]
         else:
-            n = self.dens_proj()
-            return n.inspace_points[jax.random.categorical(self.prngkey, log(pref.flatten())), :]
+            assert False, "No known method selected for point_representant"
+        if not keepdims:
+            return rval.squeeze()
+        else:
+            return rval
     
     def pos_proj(self, nsamps:int = None) -> "FiniteVec":
         """Project to RKHS element with purely positive prefactors. Assumes `len(self) == 1`.
@@ -192,16 +193,8 @@ class FiniteVec(Vec):
         """
         assert(len(self) == 1)
         if nsamps is None:
-            G = kernel(self.inspace_points).astype(np.float64)
-            c = 2*self.reduce_gram(G)
-            def cost(f):
-                f = f.reshape((len(self), G.shape[0]))
-                return np.sum(dot(dot(f, G), f.T) - dot(f, c.T))
-            res = osp.optimize.minimize(__casted_output(cost),
-                                    rand(len(factors))+ 0.0001,
-                                    jac = __casted_output(grad(cost)),
-                                    bounds = [(0., None)] * len(factors))
-            return self.updated(pos_proj(self.inspace_points, res["x"], self.k))
+            lin_map = gram_projection(Reduce.apply(self._raw_gram, self.reduce, 0), G_repr = self._raw_gram, method = "pos_proj")
+            return FiniteVec(self.k, self.inspace_points, [LinearReduce(lin_map)])
         else:
             assert False, "Frank-Wolfe needs attention."
             #the problem are circular imports.
@@ -216,6 +209,15 @@ class FiniteVec(Vec):
         """
         return self.normalized().pos_proj(nsamps).normalized()
     
+    def cdist(self, other:"FiniteVec", norm_power:float = 2.):
+        """Compute RKHS distance between RKHS elements in vector self and in vector other.
+        """
+
+        if self == other:
+            return rkhs_cdist(self.inner(other))
+        else:
+            return rkhs_cdist(self.inner(other), self.inner(), other.inner())
+
     def rvs(self, nsamps:int = 1) -> np.array:
         assert np.all(self.prefactors >= 0.)
 
@@ -246,52 +248,24 @@ def choose_representer_from_gram(G, factors):
     assert rval < rkhs_distances_sq.size
     return rval
 
-def gram_projection(G_repr_orig:np.array, G_repr:np.array=None, G_orig:np.array=None, method:str = "representer"):
-    
-    assert len(G_orig.shape) == 2 and len(G_repr_orig.shape)==2
-    if G_repr is not None:
-        assert len(G_repr.shape) == 2 and G_repr.shape[0] == G_repr.shape[1] and G_repr_orig.shape[0] == G_repr.shape[0]
-        assert G_repr.shape[1] % G_repr_orig.shape[1] == 0, "Shapes of Gram matrices do not broadcast"
-    if G_orig is not None:
-        assert G_orig.shape[0] == G_orig.shape[1] and G_repr_orig.shape[1] == G_orig.shape[1]
-        assert  G_orig.shape[0] % G_repr_orig.shape[0] == 0, "Shapes of Gram matrices do not broadcast"
+def gram_projection(G_orig_repr:np.array,  G_orig:np.array=None, G_repr:np.array=None, method:str = "representer"):
     if method == "representer":
-        if G_repr == None or G_orig == None:
-            assert G_repr == None and G_orig == None, 'If method == "representer", either none or both of G_repr, G_orig should be None'
-            assert np.all(G_repr_orig == G_repr_orig.T)
-            G_repr = G_orig = G_repr_orig
-        else:
-            assert G_repr.shape == G_orig.shape and G_repr_orig.shape == G_repr.shape
-        return np.argmin(G_orig + G_repr - 2*G_repr_orig, axis=0)
+        return np.argmin(rkhs_cdist(G_orig_repr, G_repr, G_orig), 0)
     elif method == "pos_proj":
         assert G_repr is not None
-        s = G_repr_orig.T.shape
-        tr_orig = np.trace(G_orig)
+        s = G_orig_repr.shape
+        n_pref = np.prod(s)
         def cost(M):
             M = M.reshape(s)
-            return np.trace(M @ ((G_repr@ M.T) - 2*G_repr_orig))
+            return np.trace(rkhs_cdist_ignore_const(G_orig_repr @ M, M.T @ G_repr@ M))
+
         res = osp.optimize.minimize(__casted_output(cost),
-                               rand(np.prod(s))+ 0.0001,
+                               rand(n_pref)+ 0.0001,
                                jac = __casted_output(grad(cost)),
-                               bounds = [(0., None)] * len(factors))
-        return res["x"]
+                               bounds = [(0., None)] * n_pref)
+        return res["x"].reshape(s)
     else:
         assert False, "No valid method selected"
-        
-
-
-
-
-def pos_proj(support_points, factors, kernel):
-    G = kernel(support_points).astype(np.float64)
-    c = 2*np.dot(factors, G)
-    cost = lambda f: dot(dot(f, G), f) - dot(c, f)
-    res = osp.optimize.minimize(__casted_output(cost),
-                               rand(len(factors))+ 0.0001,
-                               jac = __casted_output(grad(cost)),
-                               bounds = [(0., None)] * len(factors))
-
-    return res["x"]
 
 def distr_estimate_optimization(kernel, support_points, est="support"):
     G = kernel(support_points).astype(np.float64)

@@ -52,9 +52,8 @@ def test_FiniteVec(D, kernel, N):
     #                                           [np.mean(rv.k(X[:2,:], X[2:,:])), np.mean(rv.k(X[2:,:]))]])), "Ragged vector computation not accurate"
 
 
-@pytest.mark.parametrize('D', [1, 5])
 @pytest.mark.parametrize('kernel', kernel_setups)
-def test_Mean_var(D, kernel):
+def test_Mean_var(kernel):
     N = 4
 
    
@@ -86,3 +85,14 @@ def test_Mean_var(D, kernel):
     m, v = vec.normalized().get_mean_var()
     assert np.allclose(m.flatten(), np.array([0.5, 2./3]))
     assert np.allclose(v.flatten(), kernel.var + np.array([0.5, 2./3]) - m.flatten()**2)
+
+
+@pytest.mark.parametrize('kernel', kernel_setups)
+def test_point_representant(kernel):
+    vec = FiniteVec(kernel, np.array([(0.,), (1.,), (0.,), (1.,)]), [LinearReduce(np.array([ 0, 0, 1./3, 2./3]).reshape((1, -1)))])
+    assert vec.point_representant("inspace_point") == 1.
+    assert vec.point_representant("mean") == 2./3
+    vec = FiniteVec(kernel, np.array([(0.,), (1.,), (0.,), (1.,)]), [LinearReduce(np.array([0.4, 0.6, 0, 0, 0, 0, 1./3, 2./3]).reshape((2, -1)))])
+    assert np.allclose(vec.point_representant("inspace_point").squeeze(), np.array([1., 1.]))
+    assert np.allclose(vec.point_representant("mean").squeeze(), np.array([.6, 2./3]))
+
