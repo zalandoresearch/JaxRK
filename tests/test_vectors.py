@@ -96,3 +96,12 @@ def test_point_representant(kernel):
     assert np.allclose(vec.point_representant("inspace_point").squeeze(), np.array([1., 1.]))
     assert np.allclose(vec.point_representant("mean").squeeze(), np.array([.6, 2./3]))
 
+@pytest.mark.parametrize('kernel', kernel_setups)
+def test_pos_proj(kernel):
+    vecs = [
+            FiniteVec(kernel, np.array([(1.,), (-1.,), (-1.,), (1.,)]), [LinearReduce(np.array([-1./3, -0.7, 1, 2./3]).reshape((1, -1)))]),
+            FiniteVec(kernel, np.array([(2.,), (2.,), (5.,), (5,)]), [LinearReduce(np.array([-5, 10, -1, 1.5]).reshape((1, -1)))]),
+            ]
+    x = np.linspace(-10,10,1000)[:,None]
+    for v in vecs:
+        assert np.allclose(v(x), v.pos_proj()(x), atol=5e-5), "Error tolerance not met for positive projection of RKHS vector, maximum absolute error was " + str(np.abs(v(x) - v.pos_proj()(x)).max())

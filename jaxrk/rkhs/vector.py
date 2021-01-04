@@ -254,10 +254,10 @@ def gram_projection(G_orig_repr:np.array,  G_orig:np.array=None, G_repr:np.array
     elif method == "pos_proj":
         assert G_repr is not None
         s = G_orig_repr.shape
-        n_pref = np.prod(s)
+        n_pref = np.prod(np.array(s))
         def cost(M):
             M = M.reshape(s)
-            return np.trace(rkhs_cdist_ignore_const(G_orig_repr @ M, M.T @ G_repr@ M))
+            return np.trace(rkhs_cdist_ignore_const(G_orig_repr @ M.T, M @ G_repr@ M.T))
 
         res = osp.optimize.minimize(__casted_output(cost),
                                rand(n_pref)+ 0.0001,
