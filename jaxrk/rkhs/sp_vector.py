@@ -153,7 +153,7 @@ class UpdatableSpVecInner(object):
         self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
 
     def update(self, new_idx, new_obs):
-        new_idx_obs = np.concatenate((new_idx, new_obs), 0).reshape(1,-1)
+        new_idx_obs = np.concatenate((new_idx, np.atleast_1d(new_obs)), 0).reshape(1,-1)
 
         gram_mixed = self.current_raw["gram_mix_red"]
         upd_mixed = self.unchanging._raw_reduce_gram(self.unchanging.k(self.unchanging.inspace_points, new_idx_obs))
@@ -177,7 +177,7 @@ class UpdatableSpVecInner(object):
         self.current_gram = self.unchanging.inner(self.updatable, raw_cache = self.current_raw).squeeze()
 
 class RolloutIdx(Iterator[np.array], Iterable[np.array]):
-    def __init__(self, start:np.array, periodicities:np.array = None, stepsizes:np.array = None, example:np.array = None):
+    def __init__(self, start:np.array, periodicities:np.array = None, stepsizes:np.array = None, example:np.array = None, example_set_periodicity = False):
         """An IndexRollout object zig-zags through indices with periodicities given in initialization.
         At most one periodicity can be NaN, in which case it is taken to be ever-increasing
 
@@ -190,7 +190,10 @@ class RolloutIdx(Iterator[np.array], Iterable[np.array]):
         
         if example is not None:
             self.stepsizes = np.array([np.median(x[x>0]) for x in (example[1:] - example[:-1]).T])
-            self.periodicities = example.max(0) + self.stepsizes
+            if example_set_periodicity:
+                self.periodicities = example.max(0) + self.stepsizes
+            else:
+                self.periodicities = np.array([np.inf] * self.stepsizes.size)
         else:
             assert stepsizes is not None and periodicities is not None
             self.stepsizes = stepsizes
@@ -208,6 +211,9 @@ class RolloutIdx(Iterator[np.array], Iterable[np.array]):
                 break
         self.current = rval
         return rval
+    
+    def next(self) -> np.array:
+        return self.__next__()
     
     def __iter__(self) -> Iterator[np.array]:
         return self
@@ -238,14 +244,32 @@ class RolloutSp(object):
 
 
 
-    def update(self, new_obs, new_idx):
+    def update(self, new_obs, new_idx = None):
+        if new_idx is None:
+            assert self._idx_ro is not None
+            new_idx = self._idx_ro.next()
+
         self.uinner.update(new_idx, new_obs)
         
         self.__update_current_outp_emb()
     
+    def rollout(self, num_timesteps:int):
+        rval = []
+        rval_idx = []
+        for i in range(num_timesteps):
+            idx = self._idx_ro.next()
+            new_point = self.current_outp_emb.point_representant()
+            assert new_point.size == 1
+            rval_idx.append(idx)
+            rval.append(new_point)
+            self.update(new_point, idx)
+        return (np.array(rval_idx), np.array(rval))
+    
     def __update_current_outp_emb_SpVec(self):
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
-        self.current_outp_emb = self.current_outp_emb.updated(self._cmo.matr @ self.uinner.current_gram)
+        new_map = (self._cmo.matr @ self.uinner.current_gram).squeeze()
+        assert len(new_map.shape) == 1
+        self.current_outp_emb = self.current_outp_emb.updated(new_map[np.newaxis, :])
     
     def __get_embedding_SpVec(self, idx = None):
         return self.current_outp_emb
@@ -258,7 +282,7 @@ class RolloutSp(object):
         idx_gram = self._cmo.inp_feat.v2(np.atleast_2d(idx)).squeeze()
         assert len(self.uinner.current_gram.shape) == 1 and len(idx_gram.shape) == 1
         inp_gram = self._cmo.inp_feat.combine(self.uinner.current_gram, idx_gram)
-        inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram[:, np.newaxis], 0).squeeze()
+        inp_gram = self._cmo.inp_feat.reduce_gram(inp_gram[:, np.newaxis], 0)#.squeeze()
         assert len(self.uinner.current_gram.shape) == 1 or self.uinner.current_gram.shape[1] == 1
         return self.current_outp_emb.updated((self._cmo.matr @ inp_gram).T)
 

@@ -102,13 +102,18 @@ class FiniteVec(Vec):
     
     def updated(self, prefactors) -> "FiniteVec":
         _r = copy(self.reduce)
-        if len(_r) > 0 and (isinstance(_r[-1], Prefactors) or isinstance(_r[-1], LinearReduce)): 
-            assert Reduce.final_len(len(self.inspace_points), _r) == prefactors.shape[0]
+        previous_reduction = None
+        if len(_r) > 0 and (isinstance(_r[-1], Prefactors) or isinstance(_r[-1], LinearReduce)):
+            final_len = Reduce.final_len(len(self.inspace_points), _r)
+            assert (final_len == prefactors.shape[0]) or (final_len == 1 and len(prefactors.shape) == 1)
+            previous_reduction = _r[-1]
             _r = _r[:-1]
         
-        if len(prefactors.shape) == 1:            
+        if len(prefactors.shape) == 1:
+            assert previous_reduction is None or isinstance(previous_reduction, Prefactors)            
             _r.append(Prefactors(prefactors))
         elif len(prefactors.shape) == 2:
+            assert previous_reduction is None or isinstance(previous_reduction, LinearReduce)   
             assert len(self) == prefactors.shape[0]
             _r.append(LinearReduce(prefactors))
         return FiniteVec(self.k, self.inspace_points, _r)
