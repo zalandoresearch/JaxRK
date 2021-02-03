@@ -73,6 +73,33 @@ class Prefactors(Reduce):
         assert original_len == len(self.prefactors)
         return original_len
 
+class Repeat(Reduce):
+    def __init__(self, times):
+        super().__init__()
+        self.times = times
+    
+    def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+        return np.repeat(inp, axis)
+
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        return self.call(inp, 0)
+    
+    def new_len(self, original_len:int) -> int:
+        return original_len * self.times
+
+class TileView(Reduce):
+    def __init__(self, new_len:int):
+        super().__init__()
+        self._len = new_len
+
+    def reduce_first_ax(self, inp:np.array) -> np.array:
+        assert self._len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
+        return np.broadcast_to(inp.ravel(), (self._len//inp.shape[0], inp.size)).reshape((self._len, inp.shape[1]))
+    
+    def new_len(self, original_len:int) -> int:
+        return self._len
+
+
 class Sum(Reduce):
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         return inp.sum(axis = axis, keepdims = True)
