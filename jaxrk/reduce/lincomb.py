@@ -26,11 +26,11 @@ ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
 class SparseReduce(Reduce):
     def __init__(self, idcs:List[np.array], #block_boundaries:np.array,
                        average:bool = True):
-        """SparseReduce constructs a larger Gram matrix by copying indices of a smaller one
+        """SparseReduce constructs a Gram matrix by summing/averaging over rows of its input
 
         Args:
-            idcs (List[np.array]): The indices of the rows to copy in the desired order. Each list element contains 2d Arrays.
-            average (bool): wether or not to average
+            idcs (List[np.array]): The indices of the rows to sum/average in the desired order. Each list element contains 2d arrays. The number of columns in the array is the number of summed/averaged elements.
+            average (bool): If True average rows, else sum rows.
         """
         super().__init__()
         self.idcs = idcs
@@ -47,8 +47,11 @@ class SparseReduce(Reduce):
         rval = []
 
         for i in range(len(self.idcs)):
-            reduced = self._reduce(inp[list(self.idcs[i].flatten()),:].reshape((-1, self.idcs[i].shape[1], inp.shape[1])), 1)
-            rval.append(reduced)
+            if self.idcs[i].shape[1] == 0:
+                rval.append(np.zeros((self.idcs[i].shape[0], inp.shape[1])))
+            else:
+                reduced = self._reduce(inp[list(self.idcs[i].flatten()),:].reshape((-1, self.idcs[i].shape[1], inp.shape[1])), 1)
+                rval.append(reduced)
         return np.concatenate(rval, 0)
     
     def new_len(self, original_len:int):

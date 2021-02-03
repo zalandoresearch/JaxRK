@@ -123,11 +123,18 @@ class DictKernel(Kernel):
         self.inspace_vals = inspace_vals
         self.gram_values = gram_values
     
+    def convert_data(self, inspace_data:np.array):
+        return np.array(list(map(lambda insp: self.insp_to_pos[insp], inspace_data)))
+    
     @classmethod
-    def read_file(cls, p:Path):
+    def read_file(cls, p:Path, dict_file:Path):
         with open(p) as matrix_file:
             lines = matrix_file.readlines()
 
+        with open(dict_file) as df:
+            d = df.read()
+            d = onp.array(d.strip().split())
+        
         header = None
         col_header = []
         m = []
@@ -150,14 +157,20 @@ class DictKernel(Kernel):
         if header[-1] == '*':
             header = header[:-1]
             m = m[:-1, :-1]
+        
+        reorder = np.argmax(header[:,None] == d[None,:], 0)
+       # print(header, m, "\n", d, m[reorder,:][:,reorder])
 
-        return cls(header, m)
+        return cls(d, m[reorder,:][:,reorder])
 
-    def gram(self, X, Y=None, diag = False, logsp = False):
-        assert(len(np.shape(X))==2)
-        idx_X = np.argmax(X == self.inspace_vals[None,:], 1)
-        idx_Y = np.argmax(Y == self.inspace_vals[None,:], 1)
+    def gram(self, idx_X, idx_Y=None, diag = False, logsp = False):
+        assert len(np.shape(idx_X))==2 and (idx_Y is None or len(np.shape(idx_Y))==2)
+        assert idx_X.shape[1] == 1 and (idx_Y is None or idx_X.shape[1] == idx_Y.shape[1])
+        if idx_Y is None:
+            idx_Y = idx_X
+        idx_X = idx_X.reshape(-1)
+        idx_Y = idx_Y.reshape(-1)
         if diag:
-            assert()
+            return self.gram_values[idx_X, idx_Y]
         else:
-            return self.gram_values[idx_X,:][:, idx_Y]
+            return self.gram_values[np.repeat(idx_X, idx_Y.size), np.tile(idx_Y, idx_X.size)].reshape((idx_X.size, idx_Y.size))

@@ -140,7 +140,7 @@ class FiniteVec(Vec):
     def get_mean_var(self, keepdims = False) -> np.ndarray:
         mean = self.reduce_gram(self.inspace_points, 0)
         variance_of_expectations = self.reduce_gram(self.inspace_points**2, 0) - mean**2
-        var = self.k.var + variance_of_expectations
+        var = self.k.get_var() + variance_of_expectations
 
         if keepdims:
             return (mean, var)
