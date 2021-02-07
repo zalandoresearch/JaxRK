@@ -102,7 +102,7 @@ class ThreshSpikeKernel(Kernel):
         return np.where(dists <= self.threshold_sq_eucl_distance, self.spike, self.non_spike)
 
 class DictKernel(Kernel):
-    def __init__(self, inspace_vals:np.array, gram_values:np.array):
+    def __init__(self, inspace_vals, gram_values:np.array):
         """Kernel for a fixed dictionary of input space values and accompanying gram values. Example:
         ```
             k = DictKernel(np.array([1,3]), np.array([(2, -1), (-1, 1.2)]))
@@ -116,7 +116,7 @@ class DictKernel(Kernel):
             gram_values: Gram values of shape `[len(inspace_vals), len(inspace_vals)]`.
         """
 
-        assert len(inspace_vals.shape) == 1
+        #assert len(inspace_vals.shape) == 1
         assert gram_values.shape == (len(inspace_vals), len(inspace_vals))
         assert np.all(gram_values == gram_values.T)
 
@@ -161,7 +161,7 @@ class DictKernel(Kernel):
         reorder = np.argmax(header[:,None] == d[None,:], 0)
        # print(header, m, "\n", d, m[reorder,:][:,reorder])
 
-        return cls(d, m[reorder,:][:,reorder])
+        return cls(list(d), m[reorder,:][:,reorder])
 
     def gram(self, idx_X, idx_Y=None, diag = False, logsp = False):
         assert len(np.shape(idx_X))==2 and (idx_Y is None or len(np.shape(idx_Y))==2)

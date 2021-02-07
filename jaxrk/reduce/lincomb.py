@@ -34,7 +34,7 @@ class SparseReduce(Reduce):
         """
         super().__init__()
         self.idcs = idcs
-        self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
+        self.max_idx = np.max(np.hstack(idcs))
         if average:
             self._reduce = np.mean
         else:
