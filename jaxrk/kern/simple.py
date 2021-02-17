@@ -1,5 +1,6 @@
 from pathlib2 import Path
 from typing import Callable
+from jaxrk.typing import Array
 
 import numpy as onp
 import jax.numpy as np, jax.scipy as sp, jax.scipy.stats as stats
@@ -10,37 +11,44 @@ from scipy.stats import multivariate_normal
 
 from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
+import flax.linen as ln
 
 
-class FeatMapKernel(Kernel):
+class FeatMapKernel(Kernel, ln.Module):
     """A kernel that is defined by a feature map.
     
     Args:
         feat_map: A callable that computes the feature map, i.e. given input space points it returns real valued features, one per input space point."""
 
-    def __init__(self, feat_map:Callable):
-        self.features = feat_map
+    feat_map:Callable[[Array], Array] = None
+    feat_map_factory:Callable[[], ln.Module] = None
 
-    def features_mean(self, samps):
-        return self.features(samps).mean(0)
+    def setup(self,):
+        assert (self.feat_map is None) ^ (self.feat_map_factory is None), "Either feat_map or feat_map_factory has to be provided, but not both"
+        if self.feat_map_factory is not None:
+            assert self.feat_map is None
+            self.feat_map = self.feat_map_factory()
 
-    def gram(self, X, Y = None, diag = False):
-        f_X = self.features(X)
+    def __call__(self, X, Y = None, diag = False):
+        f_X = self.feat_map(X)
         if Y is None:
             f_Y = f_X
         else:
-            f_Y = self.features(Y)
+            f_Y = self.feat_map(Y)
         if diag:
             return np.sum(f_X * f_Y, 1)
         else:
             return f_X.dot(f_Y.T)
 
 
-class LinearKernel(FeatMapKernel):
-    def __init__(self):
+class LinearKernel(Kernel, ln.Module):
+    def setup(self):
         """A simple linear kernel.
         """
-        FeatMapKernel.__init__(self, lambda x: x)
+        self.fmk = FeatMapKernel(lambda x: x)
+
+    def __call__(self, X, Y = None, diag = False):
+        self.fmk(X, Y, diag)
 
 
 
@@ -57,14 +65,7 @@ class PeriodicKernel(Kernel):
         self.period = period
         self.diffable = False
 
-
-    def get_params(self):
-        return self.params
-
-    def set_params(self, params):
-        self.params = params
-
-    def gram(self, X, Y=None, diag = False, logsp = False):
+    def __call__(self, X, Y=None, diag = False, logsp = False):
         assert(len(np.shape(X))==2)
         X = X / self.period
         if Y is not None:

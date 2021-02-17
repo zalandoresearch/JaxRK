@@ -1,1 +1,1 @@
-from . import (rkhs, kern)
+from . import (rkhs, kern, typing)

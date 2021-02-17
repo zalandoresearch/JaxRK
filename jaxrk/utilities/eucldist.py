@@ -1,10 +1,24 @@
 from typing import TypeVar
 import jax.numpy as np
+import numpy as onp
 from jax import jit
 
 #based on https://stackoverflow.com/questions/52030458/vectorized-spatial-distance-in-python-using-numpy
 
-__all__ = ["eucldist"]
+__all__ = ["eucldist", "median_heuristic"]
+
+def median_heuristic(data, distance, per_dimension = True):
+    if isinstance(distance, str):
+        dist_fn = lambda x: pdist(x, distance)
+    else:
+        dist_fn = distance
+    if per_dimension is False:
+        return onp.median(dist_fn(data))
+    else:
+        def single_dim_heuristic(data_dim):
+            return median_heuristic(data_dim[:, None], dist_fn, per_dimension = False)
+        return onp.apply_along_axis(single_dim_heuristic, 0, data)
+
 @jit
 def sqeucldist_simple(a, b = None):
     a_sumrows = np.einsum('ij,ij->i', a, a)

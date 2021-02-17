@@ -1,9 +1,16 @@
 
-from typing import Callable
+from typing import Callable, Tuple, Union, Optional
+from jaxrk.typing import PRNGKeyT, Shape, Dtype, Array
+from jaxrk.utilities.constraints import SoftPlus, Bijection, ConstInit, Sigmoid
+from dataclasses import dataclass
+from flax.linen.module import compact, Module
+import flax.linen as ln
 
 import jax.numpy as np
 import jax.scipy as sp
 import jax.scipy.stats as stats
+import flax.linen as ln
+from jax.random import PRNGKey
 
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
@@ -13,152 +20,180 @@ from scipy.stats import multivariate_normal, norm
 from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
 
+class NoScaler(ln.Module):
+    def __call__(self, inp):
+        return inp
+    
+    def inv(self):
+        return 1.
+    
+    def scale(self):
+        return 1.
 
-def pos_param(x):
-    return np.where(x >= 1, x, log(1 + exp(x - 1)))
-
-
-def inv_pos_param(y):
-    return np.where(y >= 1, y,  log(exp(y) - 1) + 1)
-
-class StationaryKernel(Kernel):
-
-    def __init__(self, sqdist_custom = True) -> None:
-        """Base class for stationary kernels, depending only on
-
-        sqdist = ‖x - x'‖^2
-
-    Derived classes should implement either of:
-
-        gram_sqdist(self, sqdist, logsp): Returns the kernel evaluated on sqdist,
-        (squared un-scaled Euclidean distance), operating element-wise sqdist.
-
-        gram_dist(self, dist, logsp): Returns the kernel evaluated on dist,
-        (un-scaled Euclidean distance), operating element-wise dist.
+class Scaler(ln.Module):
+    bij: Bijection = SoftPlus()
+    init: Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
+    scale_shape: Shape = (1, 1)
 
 
-        Args:
-            sqdist_custom (bool, optional): Wether to use JaxRK custom euclidean distance computation. Defaults to True.
-        """
-        self.sqdist_custom = sqdist_custom
+    def setup(self):
+        self.s = self.bij(self.param("s", self.init, self.scale_shape, np.float32, self.bij))
 
-    def gram(self, X, Y=None, diag = False, logsp = False):
-        assert(len(np.shape(X))==2)
-        inp_dim = np.shape(X)[1]
+    def inv(self):
+        return 1./self.s
+    
+    def scale(self):
+        return self.s
+
+    def __call__(self, inp):
+        assert len(inp.shape) == len(self.scale_shape)
+        
+        return self.s * inp
+
+
+
+
+
+class ScaledPairwiseDistance(ln.Module):
+    """A class for computing scaled pairwise distance for stationary/RBF kernels, depending only on
+
+        dist = ‖x - x'‖^p
+
+    For some power p.
+    """
+
+    scale:bool = True
+    power:float = 2.
+    scale_dim:int = 1
+    scale_init:Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
+
+    def setup(self,):
+        assert self.scale_dim >= 1
+        if not self.scale:
+            self.ds = self.gs = NoScaler()
+        else:
+            if self.scale_dim > 0:
+                self.gs = Scaler(init = self.scale_init)
+                self.ds = NoScaler()
+            else:
+                self.gs = NoScaler()
+                self.ds = Scaler(scale_shape = (1, self.scale_dim), init = self.scale_init)  
+
+
+    
+    def _get_scale_param(self):
+        if self.scale_dim > 1:
+            return self.gs.inv()**(1./self.power)
+        else:
+            return self.ds.inv()
+
+    def __call__(self, X, Y=None, diag = False,):
+        assert len(X.shape) == 2
+      
+
         if diag:
             if Y is None:
-                sq_dists = np.zeros(X.shape[0])
+                dists = np.zeros(X.shape[0])
             else:
                 assert(X.shape == Y.shape)
-                sq_dists = np.sum((X - Y)**2, 1)
+                dists = self.gs(np.sum(np.abs(self.ds(X) - self.ds(Y))**self.power, 1))
         else:
-            sq_dists = eucldist(X, Y, power = 2.)
-        return self.gram_sqdist(sq_dists, inp_dim, logsp = logsp)
-        
-    def gram_sqdist(self, sqdist, inp_dim, logsp = False):
-        if hasattr(self, "gram_dist"):
-            r = np.sqrt(np.clip(sqdist, 1e-36))
-            return self.gram_dist(sqdist, inp_dim, logsp = logsp) 
-        raise NotImplementedError
+            sY = None
+            if Y is not None:
+                sY = self.ds(Y)
+            dists = self.gs(eucldist(self.ds(X), sY, power = self.power))
+        return dists
 
 
-class GenGaussKernel(StationaryKernel): #this is the gennorm distribution from scipy
-    def __init__(self, scale : np.array = np.array([1.]), shape :np.array = np.array([2.]), sqdist_custom = True):
-        """Kernel derived from the pdf of the generalized Gaussian distribution (https://en.wikipedia.org/wiki/Generalized_normal_distribution#Version_1).
+class GenGaussKernel(Kernel, ln.Module): #this is the gennorm distribution from scipy
+    """Kernel derived from the pdf of the generalized Gaussian distribution (https://en.wikipedia.org/wiki/Generalized_normal_distribution#Version_1).
 
         Args:
             scale (np.array, optional): Scale parameter. Defaults to np.array([1.]).
             shape (np.array, optional): Shape parameter in the half-open interval (0,2]. Lower values result in pointier kernel functions. Shape == 2 results in usual Gaussian kernel, shape == 1 results in Laplace kernel. Defaults to np.array([2.]).
-        """
-        super().__init__(sqdist_custom)
-        assert(np.all(scale > 0))
-        assert(np.all(shape >= 0))
-        assert(np.all(shape <= 2))
-        self.scale = scale
-        self.__set_standard_dev(scale)
-        self.shape = shape
+    """
+    per_dim_scale:bool = False
+    input_dim:int = None
+    scale_init:Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
+
+    shape_bij: Bijection = Sigmoid(0., 2.)
+    shape_init: Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
+
+#   FIXME: it also works to declare
+#
+#   shape: Union[Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array], float, Array] = ConstInit(np.ones(1))
+#
+#   and then setup the class with
+    # if isinstance(self.shape, Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array]):
+    #     #initialization function
+    #     self.shape_val = self.shape_bij(self.param("shape", self.shape_init, (1,), np.float32, self.shape_bij))
+    # else:
+    #     #fixed float or array
+    #     assert np.all(self.shape > 0)
+    #     assert np.all(self.shape <= 2)
+    #     self.shape_val = self.shape
 
 
-    def __set_standard_dev(self, sd):
-        assert(np.all(sd > 0))
-        self._sd = sd
-        self.var = sd**2
-        self._const_factor = -0.5 / sd**2
-        self._normalization = (sqrt(2*np.pi)*sd)
-        self._log_norm = log(self._normalization)
+    def setup(self):
+        scale_dim = 1
+        if self.per_dim_scale:
+            assert self.dim is not None, "If scaling per dimension, input dimension must be provided"
+            scale_dim = self.dim            
+        self.shape = self.shape_bij(self.param("shape", self.shape_init, (1,), np.float32, self.shape_bij))
+        self.dist = ScaledPairwiseDistance(power = self.shape, scale_dim = scale_dim, scale_init = self.scale_init)
 
+    def get_sd(self):
+        return np.sqrt(self.get_var())
+    
     def get_var(self):
-        return self._sd**2
+        f = np.exp(sp.special.gammaln(np.array([3, 1]) / self.shape))
+        return self.dist._get_scale_param()**2 * f[0] / f[1]
 
-    def gram_sqdist(self, sqdist, inp_dim, logsp = False):            
-        rval = self._const_factor* sqdist - self._log_norm * inp_dim
-        if not logsp:
-            return exp(rval)
-        return rval
+    def __call__(self, X, Y=None, diag = False,):
+        return exp(-self.dist(X, Y, diag))
 
-class GaussianKernel(DensityKernel, StationaryKernel):
-    def __init__(self, sigma = np.array([1]), diffable = False):
-        self.set_params(pos_param(sigma))
-        self.diffable = diffable
 
-    def get_params(self):
-        return self.params
+class GaussianKernel(Kernel, ln.Module):
+    per_dim_scale:bool = False
+    input_dim:int = None
 
-    def get_double_var_kern(self):
-        return GaussianKernel(np.sqrt(2) * self._sd)
+    scale_init:Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
 
-    def set_params(self, params):
-        self.params = np.atleast_1d(params).flatten()[0]
-        self.__set_standard_dev(pos_param(self.params))
+    def setup(self):
+        scale_dim = 1
+        if self.per_dim_scale:
+            assert self.dim is not None, "If scaling per dimension, input dimension must be provided"
+            scale_dim = self.dim
+        self.dist = ScaledPairwiseDistance(power = 2., scale_dim = scale_dim, scale_init = self.scale_init)
 
-    def __set_standard_dev(self, sd):
-        assert(np.all(sd > 0))
-        self._sd = sd
-        self.var = sd**2
-        self._const_factor = -0.5 / sd**2
-        self._normalization = (sqrt(2*np.pi)*sd)
-        self._log_norm = log(self._normalization)
-
+    def get_sd(self):
+        return self.dist._get_scale_param()
+    
     def get_var(self):
-        return self._sd**2
+        return self.get_sd()**2
 
-    def gram_sqdist(self, sqdist, inp_dim, logsp = False):
-        rval = self._const_factor* sqdist - self._log_norm * inp_dim
-        if not logsp:
-            return exp(rval)
-        return rval
+    def __call__(self, X, Y=None, diag = False,):
+        return exp(-self.dist(X, Y, diag) / 2)
 
-    def rvs(self, nrows, ncols):
-        return norm.rvs(size = (nrows, ncols)) * self._sd
 
-class LaplaceKernel(StationaryKernel):
-    def __init__(self, sigma, diffable = False, sqdist_custom = True):
-        super().__init__(sqdist_custom)
-        self.set_params(log(exp(sigma) - 1))
-        self.diffable = diffable
+class LaplaceKernel(Kernel, ln.Module):
+    per_dim_scale:bool = False
+    input_dim:int = None
+    scale_init:Callable[[PRNGKeyT, Shape, Dtype, Bijection], Array] = ConstInit(np.ones(1))
 
-    def get_params(self):
-        return self.params
+    def setup(self):
+        scale_dim = 1
+        if self.per_dim_scale:
+            assert self.dim is not None, "If scaling per dimension, input dimension must be provided"
+            scale_dim = self.dim
+        self.dist = ScaledPairwiseDistance(power = 1., scale_dim = scale_dim, scale_init = self.scale_init)
 
-    def set_params(self, params):
-        self.params = np.atleast_1d(params).flatten()[0]
-        self.__set_standard_dev(log(exp(self.params) + 1))
 
-    def __set_standard_dev(self, sd):
-        self._sd = sd
-        self._scale = sd
-        self._const_factor = -1./self._scale
-        self._normalization = 2 * self._scale
-        self._log_norm = log(self._normalization)
-
+    def get_sd(self):
+        return np.sqrt(2) * self.dist._get_scale_param()
+    
     def get_var(self):
-        return 2 * self._scale**2
+        return self.get_sd()**2
 
-    def gram_dist(self, dist, inp_dim, logsp = False):
-        rval = self._const_factor * dist - self._log_norm * inp_dim
-        if not logsp:
-            return exp(rval)
-        return rval
-
-    def rvs(self, nrows, ncols):
-        return stats.laplace.rvs(scale=self._scale, size = (nrows, ncols))
+    def __call__(self, X, Y=None, diag = False,):
+        return exp(-self.dist(X, Y, diag))
