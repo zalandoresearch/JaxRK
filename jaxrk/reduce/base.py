@@ -13,6 +13,7 @@ import jax.scipy as sp
 import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
+from jaxrk.utilities.views import tile_view
 
 
 
@@ -94,7 +95,7 @@ class TileView(Reduce):
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
         assert self._len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
-        return np.broadcast_to(inp.ravel(), (self._len//inp.shape[0], inp.size)).reshape((self._len, inp.shape[1]))
+        return tile_view(inp, self._len//inp.shape[0])
     
     def new_len(self, original_len:int) -> int:
         return self._len

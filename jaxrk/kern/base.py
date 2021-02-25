@@ -38,5 +38,9 @@ class Kernel(object):
 
 class DensityKernel(Kernel):
     """Type for positive definite kernels that are also densities."""
+    def std(self):
+        raise NotImplementedError()
+    def var(self):
+        raise NotImplementedError()
     def rvs(self, nsamps):
         raise NotImplementedError()

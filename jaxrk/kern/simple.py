@@ -1,6 +1,8 @@
 from pathlib2 import Path
 from typing import Callable
-from jaxrk.typing import Array
+from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array
+from jaxrk.core import Module
+from functools import partial
 
 import numpy as onp
 import jax.numpy as np, jax.scipy as sp, jax.scipy.stats as stats
@@ -9,25 +11,26 @@ from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
 
-from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
+from jaxrk.kern.util import ScaledPairwiseDistance
+from jaxrk.core.init_fn import ConstFn, ConstIsotropicFn
 import flax.linen as ln
+from jaxrk.core.typing import ConstOrInitFn
+from jaxrk.core.init_fn import ConstFn, ConstIsotropicFn
+from jaxrk.core.constraints import SoftPlus, Bijection, CholeskyBijection
+from jaxrk.utilities.views import tile_view
 
 
-class FeatMapKernel(Kernel, ln.Module):
+class FeatMapKernel(Kernel, Module):
     """A kernel that is defined by a feature map.
     
     Args:
         feat_map: A callable that computes the feature map, i.e. given input space points it returns real valued features, one per input space point."""
 
     feat_map:Callable[[Array], Array] = None
-    feat_map_factory:Callable[[], ln.Module] = None
 
     def setup(self,):
-        assert (self.feat_map is None) ^ (self.feat_map_factory is None), "Either feat_map or feat_map_factory has to be provided, but not both"
-        if self.feat_map_factory is not None:
-            assert self.feat_map is None
-            self.feat_map = self.feat_map_factory()
+        assert self.feat_map is not None
 
     def __call__(self, X, Y = None, diag = False):
         f_X = self.feat_map(X)
@@ -41,70 +44,49 @@ class FeatMapKernel(Kernel, ln.Module):
             return f_X.dot(f_Y.T)
 
 
-class LinearKernel(Kernel, ln.Module):
+LinearKernel = partial(FeatMapKernel, feat_map = lambda x:x)
+
+class PeriodicKernel(Kernel, Module):
+    ls:float = 1.
+    per_dim_period:bool = False
+    dim:int = None
+    period_init:ConstOrInitFn = ConstFn(1.)
+
     def setup(self):
-        """A simple linear kernel.
-        """
-        self.fmk = FeatMapKernel(lambda x: x)
+        assert self.period_init is not None
+        scale_dim = 1
+        if self.per_dim_scale:
+            assert self.dim is not None, "For one period per dimension, input dimension must be provided"
+            scale_dim = self.dim
+        self.dist = ScaledPairwiseDistance(power = 1., scale_dim = scale_dim, scale_init = self.period_init)
 
-    def __call__(self, X, Y = None, diag = False):
-        self.fmk(X, Y, diag)
-
-
-
-class PeriodicKernel(Kernel):
-    def __init__(self, period:float, lengthscale:float, ):
-        """Periodic kernel, i.e. exp(- 2 sin(π dists/period)^2 / lengthscale^2).
-
-        Args:
-            period (float): Period length.
-            lengthscale (float): Lengthscale
-        """
-        #self.set_params(log(exp(np.array([s2,df])) - 1))
-        self.ls = lengthscale
-        self.period = period
-        self.diffable = False
-
-    def __call__(self, X, Y=None, diag = False, logsp = False):
+    def __call__(self, X, Y=None, diag = False):
         assert(len(np.shape(X))==2)
-        X = X / self.period
-        if Y is not None:
-            Y = Y / self.period
+        return exp(- 2* np.sin(np.pi * self.dist(X,Y, diag))**2 / self.ls**2)
 
-        if diag:
-            assert()
-        else:
-            dists = eucldist(X, Y, power = 1.)
-        assert(not logsp)
-        return exp(- 2* np.sin(np.pi*dists)**2 / self.ls**2)
-
-class ThreshSpikeKernel(Kernel):
-    def __init__(self, spike:float = 1., non_spike:float = 0.5, threshold_sq_eucl_distance = 0.):
-        """Takes on spike falue if squared euclidean distance is below a certain threshold, else non_spike value
+class ThreshSpikeKernel(Kernel, Module):
+    """Takes on spike falue if squared euclidean distance is below a certain threshold, else non_spike value
 
         Args:
             spike (float, optional): Kernel value > 0 when input point is equal. Defaults to 1.
             non_spike (float, optional): Kernel value when input point is unequal. abs(non_spike) < spike. Defaults to 0.5.
-        """
-        assert spike > 0
-        assert abs(non_spike)  < spike
+    """
+    spike:float = 1.
+    non_spike:float = 0.5
+    threshold_distance = 0.
+    def setup(self, ):
+        
+        assert self.spike > 0
+        assert abs(self.non_spike)  < self.spike
+        self.dist = ScaledPairwiseDistance(power = 2., scale = False)
 
-        self.spike = spike
-        self.non_spike = non_spike
-        self.threshold_sq_eucl_distance = threshold_sq_eucl_distance
-
-    def gram(self, X, Y=None, diag = False, logsp = False):
+    def __call__(self, X, Y=None, diag = False):
         assert(len(np.shape(X))==2)
-        if diag:
-            assert()
-        else:
-            dists = eucldist(X, Y, power = 2.)
-        assert(not logsp)
-        return np.where(dists <= self.threshold_sq_eucl_distance, self.spike, self.non_spike)
+        assert not diag
+        return np.where(self.dist(X,Y, diag) <= self.threshold_distance, self.spike, self.non_spike)
 
-class DictKernel(Kernel):
-    def __init__(self, inspace_vals:np.array, gram_values:np.array):
-        """Kernel for a fixed dictionary of input space values and accompanying gram values. Example:
+class DictKernel(Kernel, Module):
+    """Kernel for a fixed dictionary of input space values and accompanying gram values. Example:
         ```
             k = DictKernel(np.array([1,3]), np.array([(2, -1), (-1, 1.2)]))
             assert k(np.array(1), np.array(1)) == 2
@@ -115,17 +97,17 @@ class DictKernel(Kernel):
         Args:
             inspace_vals: Order of input space values that this DictKernel is valid for.
             gram_values: Gram values of shape `[len(inspace_vals), len(inspace_vals)]`.
-        """
+    """
+    inspace_vals:Array
+    gram_values_init:ConstOrInitFn = ConstIsotropicFn(np.ones(1))
+    diag_bij:Bijection = SoftPlus()
 
-        assert len(inspace_vals.shape) == 1
-        assert gram_values.shape == (len(inspace_vals), len(inspace_vals))
-        assert np.all(gram_values == gram_values.T)
+    def setup(self, ):
+        assert len(self.inspace_vals.shape) == 1
 
-        self.inspace_vals = inspace_vals
-        self.gram_values = gram_values
-    
-    def convert_data(self, inspace_data:np.array):
-        return np.array(list(map(lambda insp: self.insp_to_pos[insp], inspace_data)))
+        self.gram_bij = CholeskyBijection(diag_bij = self.diag_bij)
+        self.gram_values = self.gram_bij(self.const_or_param("gram_param", gram_values_init, dim = (self.inspace_vals), bij = self.gram_bij))
+        assert self.gram_values.shape == (len(self.inspace_vals), len(self.inspace_vals))
     
     @classmethod
     def read_file(cls, p:Path, dict_file:Path):
@@ -164,7 +146,7 @@ class DictKernel(Kernel):
 
         return cls(d, m[reorder,:][:,reorder])
 
-    def gram(self, idx_X, idx_Y=None, diag = False, logsp = False):
+    def __call__(self, idx_X, idx_Y=None, diag = False):
         assert len(np.shape(idx_X))==2 and (idx_Y is None or len(np.shape(idx_Y))==2)
         assert idx_X.shape[1] == 1 and (idx_Y is None or idx_X.shape[1] == idx_Y.shape[1])
         if idx_Y is None:
@@ -174,4 +156,8 @@ class DictKernel(Kernel):
         if diag:
             return self.gram_values[idx_X, idx_Y]
         else:
-            return self.gram_values[np.repeat(idx_X, idx_Y.size), np.tile(idx_Y, idx_X.size)].reshape((idx_X.size, idx_Y.size))
+            #FIXME: repeat_view
+            #using https://stackoverflow.com/questions/5564098/repeat-numpy-array-without-replicating-data
+            #and https://github.com/google/jax/issues/3171
+            #as starting points
+            return self.gram_values[np.repeat(idx_X, idx_Y.size), tile_view(idx_Y, idx_X.size)].reshape((idx_X.size, idx_Y.size))
