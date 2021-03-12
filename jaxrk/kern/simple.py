@@ -21,7 +21,7 @@ from jaxrk.core.constraints import SoftPlus, Bijection, CholeskyBijection
 from jaxrk.utilities.views import tile_view
 
 
-class FeatMapKernel(Kernel, Module):
+class FeatMapKernel(Kernel):
     """A kernel that is defined by a feature map.
     
     Args:
@@ -46,46 +46,7 @@ class FeatMapKernel(Kernel, Module):
 
 LinearKernel = partial(FeatMapKernel, feat_map = lambda x:x)
 
-class PeriodicKernel(Kernel, Module):
-    ls:float = 1.
-    per_dim_period:bool = False
-    dim:int = None
-    period_init:ConstOrInitFn = ConstFn(1.)
-
-    def setup(self):
-        assert self.period_init is not None
-        scale_dim = 1
-        if self.per_dim_scale:
-            assert self.dim is not None, "For one period per dimension, input dimension must be provided"
-            scale_dim = self.dim
-        self.dist = ScaledPairwiseDistance(power = 1., scale_dim = scale_dim, scale_init = self.period_init)
-
-    def __call__(self, X, Y=None, diag = False):
-        assert(len(np.shape(X))==2)
-        return exp(- 2* np.sin(np.pi * self.dist(X,Y, diag))**2 / self.ls**2)
-
-class ThreshSpikeKernel(Kernel, Module):
-    """Takes on spike falue if squared euclidean distance is below a certain threshold, else non_spike value
-
-        Args:
-            spike (float, optional): Kernel value > 0 when input point is equal. Defaults to 1.
-            non_spike (float, optional): Kernel value when input point is unequal. abs(non_spike) < spike. Defaults to 0.5.
-    """
-    spike:float = 1.
-    non_spike:float = 0.5
-    threshold_distance = 0.
-    def setup(self, ):
-        
-        assert self.spike > 0
-        assert abs(self.non_spike)  < self.spike
-        self.dist = ScaledPairwiseDistance(power = 2., scale = False)
-
-    def __call__(self, X, Y=None, diag = False):
-        assert(len(np.shape(X))==2)
-        assert not diag
-        return np.where(self.dist(X,Y, diag) <= self.threshold_distance, self.spike, self.non_spike)
-
-class DictKernel(Kernel, Module):
+class DictKernel(Kernel):
     """Kernel for a fixed dictionary of input space values and accompanying gram values. Example:
         ```
             k = DictKernel(np.array([1,3]), np.array([(2, -1), (-1, 1.2)]))
@@ -98,12 +59,12 @@ class DictKernel(Kernel, Module):
             inspace_vals: Order of input space values that this DictKernel is valid for.
             gram_values: Gram values of shape `[len(inspace_vals), len(inspace_vals)]`.
     """
-    inspace_vals:Array
+    inspace_vals:Array = None
     gram_values_init:ConstOrInitFn = ConstIsotropicFn(np.ones(1))
     diag_bij:Bijection = SoftPlus()
 
     def setup(self, ):
-        assert len(self.inspace_vals.shape) == 1
+        assert self.inspace_vals is None or len(self.inspace_vals.shape) == 1
 
         self.gram_bij = CholeskyBijection(diag_bij = self.diag_bij)
         self.gram_values = self.gram_bij(self.const_or_param("gram_param", gram_values_init, dim = (self.inspace_vals), bij = self.gram_bij))

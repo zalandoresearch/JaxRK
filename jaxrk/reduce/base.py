@@ -14,12 +14,16 @@ import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from jaxrk.utilities.views import tile_view
+from jaxrk.core import Module
+import flax.linen as ln
+from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
+from jaxrk.core.init_fn import ConstFn
 
 
 
 
 
-class Reduce(Callable, ABC):
+class Reduce(Callable, ABC, Module):
     """The basic reduction type."""
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         rval = self.reduce_first_ax(np.swapaxes(inp, axis, 0))
@@ -60,11 +64,19 @@ class NoReduce(Reduce):
         return original_len
 
 class Prefactors(Reduce):
-    def __init__(self, pref:np.array) -> None:
-        assert len(pref.shape) == 1
-        self.prefactors = pref
+    factors_init: ConstOrInitFn = ConstFn(np.ones(1))
+    dim:int = None
+
+    def setup(self):
+        if not isinstance(self.factors_init, Callable):
+            if self.dim is None:
+                self.dim = self.factors_init.shape[0]
+            else:
+                assert self.dim == self.prefactors.shape[0]
+        self.prefactors = self.const_or_param("prefactors", self.factors_init, (self.dim,), np.float32, )
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+        assert self.dim == inp.shape[axis]
         return inp.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
@@ -75,9 +87,10 @@ class Prefactors(Reduce):
         return original_len
 
 class Repeat(Reduce):
-    def __init__(self, times):
-        super().__init__()
-        self.times = times
+    times:int
+
+    def setup(self, ):
+        assert self.times > 0
     
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         return np.repeat(inp, axis)
@@ -89,16 +102,17 @@ class Repeat(Reduce):
         return original_len * self.times
 
 class TileView(Reduce):
-    def __init__(self, new_len:int):
-        super().__init__()
-        self._len = new_len
+    new_len:int
+
+    def setup(self, ):
+        assert self.new_len > 0
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
-        assert self._len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
-        return tile_view(inp, self._len//inp.shape[0])
+        assert self.new_len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
+        return tile_view(inp, self.new_len//inp.shape[0])
     
     def new_len(self, original_len:int) -> int:
-        return self._len
+        return self.new_len
 
 
 class Sum(Reduce):
@@ -123,9 +137,10 @@ class Mean(Reduce):
 
 class BalancedSum(Reduce):
     """Sum up even number of elements in input."""
-    def __init__(self, points_per_split:int) -> None:
-        assert points_per_split > 0
-        self.points_per_split = points_per_split
+    points_per_split:int
+    
+    def setup(self, ):
+        assert self.points_per_split > 0
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         perm = list(range(len(inp.shape)))

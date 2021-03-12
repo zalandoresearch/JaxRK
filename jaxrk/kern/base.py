@@ -19,9 +19,10 @@ from scipy.stats import multivariate_normal
 from scipy.spatial.distance import pdist
 
 from jaxrk.utilities.eucldist import eucldist
+from jaxrk.core import Module
 
 
-class Kernel(object):
+class Kernel(Module):
     """A generic kernel type."""
     def __call__(self, X, Y = None, diag = False) -> np.array:
         """Compute the gram matrix, i.e. the kernel evaluated at every element of X paired with each element of Y (if not None, otherwise each element of X).

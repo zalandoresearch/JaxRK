@@ -1,5 +1,6 @@
 
-from typing import Callable
+from typing import Callable, List
+from jaxrk.core.typing import Array, Any
 
 import jax.numpy as np
 import jax.scipy as sp
@@ -15,29 +16,18 @@ from jaxrk.kern.base import DensityKernel, Kernel
 
 
 class SplitDimsKernel(Kernel):
-    def __init__(self, intervals, kernels, operation = "*", weights = None):
-        assert(len(intervals) - 1 == len(kernels))
-        self.intervals = intervals
-        self.kernels = kernels
-        if operation == "*":
-            self.weights = np.ones(len(kernels))
-            self.op = lambda x: np.prod(x, 0)
-            self.log_op = lambda x: np.sum(x, 0)
-            if weights is None:
-                self.weights = np.ones(len(kernels))
-            else:
-                self.weights = weights
-        else:
-            assert(operation == '+')
-            self.op = lambda x: np.sum(x, 0)
-            self.log_op = lambda x: logsumexp(x, 0)
-            if weights is None:
-                self.weights = np.ones(len(kernels))
-            else:
-                self.weights = weights
+    intervals:Array
+    kernels:List[Kernel]
+    operation:Callable = lambda x: np.prod(x, 0)
+    weights:Array = None
+
+    def setup(self):
+        assert len(self.intervals) - 1 == len(self.kernels)
+        assert  self.weights is None or self.weights.size == len(self.kernels)
+        if self.weights is None:
+            self.weights = np.ones(len(self.kernels))
         
-    def gram(self, X, Y=None, diag = False, logsp = False):
-        assert(not logsp)
+    def __call__(self, X, Y=None, diag = False):
         
         split_X = [X[:, self.intervals[i]:self.intervals[i + 1]] for i in range(len(self.kernels))]
         if Y is None:
@@ -45,19 +35,16 @@ class SplitDimsKernel(Kernel):
         else:
             split_Y = [Y[:, self.intervals[i]:self.intervals[i + 1]] for i in range(len(self.kernels))]
         sub_grams = np.array([self.kernels[i].gram(split_X[i], split_Y[i], diag = diag) * self.weights[i]  for i in range(len(self.kernels))])
-        return self.op(sub_grams)
+        return self.operation(sub_grams)
                 
 
 class SKlKernel(Kernel):
-    def __init__(self, sklearn_kernel):
-        self.skl = sklearn_kernel
+    sklearn_kernel:Any
 
-    def gram(self, X, Y=None, diag = False, logsp = False):
+    def __call__(self, X, Y=None, diag = False):
         if diag:
             assert(Y is None)
-            rval = self.skl.diag(X)
+            rval = self.sklearn_kernel.diag(X)
         else:
-            rval = self.skl(X, Y)
-        if logsp:
-            rval = log(rval)
+            rval = self.sklearn_kernel(X, Y)
         return rval
