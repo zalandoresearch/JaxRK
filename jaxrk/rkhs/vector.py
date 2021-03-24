@@ -17,8 +17,8 @@ from numpy.random import rand
 
 from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.kern import Kernel
-from jaxrk.utilities.rkhsdist import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const
-
+from jaxrk.utilities.gram import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const, gram_projection
+from jaxrk.core.typing import AnyOrInitFn
 
 
 from .base import Map, RkhsObject, Vec
@@ -26,25 +26,20 @@ from .base import Map, RkhsObject, Vec
 #from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
 
 
-
-def __casted_output(function):
-    return lambda x: onp.asarray(function(x), dtype=np.float64)
-
-
 class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
     k:Kernel
-    insp_pts:Any
+    insp_pts_init: AnyOrInitFn
     reduce:List[Reduce] = []
     def setup(self, ):
         assert(len(self.insp_pts.shape) == 2)
         if self.reduce is None:
             self.reduce = []
 
-        self.__len = Reduce.final_len(len(self.insp_pts), reduce)
-        
+        self.__len = self.variable("__len", lambda pts, red: Reduce.final_len(len(pts), red), self.insp_pts, self.reduce)
+        self.insp_pts = self.const_or_param("insp_pts", self.insp_pts_init,)
         self.prngkey = jax.random.PRNGKey(np.int64(time()))
         self._raw_gram_cache = None
 
@@ -86,17 +81,6 @@ class FiniteVec(Vec):
         else:
             assert False
             p = np.ones(len(self))/ len(self)
-        
-    
-    def __getitem__(self, index):
-        return FiniteVec(self.k, self.insp_pts[index], self.prefactors[index])
-    
-    def __getitem_balanced__(self, index):
-        start, stop = (index * self.points_per_split, index+1 * self.points_per_split)
-        return FiniteVec(self.k, self.insp_pts[start, stop], self.prefactors[start, stop], points_per_split = self.points_per_split)
-    
-    def __getitem_ragged__(self, index):
-        raise NotImplementedError()
     
     def updated(self, prefactors) -> "FiniteVec":
         _r = copy(self.reduce)
@@ -212,65 +196,12 @@ class FiniteVec(Vec):
         """
         return self.normalized().pos_proj(nsamps).normalized()
     
-    def cdist(self, other:"FiniteVec", norm_power:float = 2.):
-        """Compute RKHS distance between RKHS elements in vector self and in vector other.
-        """
-
-        if self == other or other is None:
-            return rkhs_gram_cdist(self.inner(), power = norm_power)
-        else:
-            return rkhs_gram_cdist(self.inner(other), self.inner(), other.inner(), power = norm_power)
-
-    def rvs(self, nsamps:int = 1) -> np.array:
-        assert np.all(self.prefactors >= 0.)
-
-        #use residual resampling from SMC theory
-        if nsamps is None:
-            nsamps = len(pop)        
-        prop_w = log(self.normalized().prefactors)
-        mult = exp(prop_w + log(nsamps))
-        count = np.int32(np.floor(mult))
-        resid = log(mult - count)
-        resid = resid - logsumexp(resid)
-        count = count + onp.random.multinomial(nsamps - count.sum(), exp(resid))
-
-        rval = np.repeat(self.insp_pts, count, 0) + self.k.rvs(nsamps, self.insp_pts.shape[1])
-        return rval
-
-    
     def __call__(self, argument):
         return inner(self, FiniteVec(self.k, argument, []))
 
-def choose_representer(support_points, factors, kernel):
-    return choose_representer_from_gram(kernel(support_points).astype(np.float64), factors)
-
-def choose_representer_from_gram(G, factors):
-    fG = np.dot(factors, G)
-    rkhs_distances_sq = (np.dot(factors, fG).flatten() + np.diag(G) - 2 * fG).squeeze()
-    rval = np.argmin(rkhs_distances_sq)
-    assert rval < rkhs_distances_sq.size
-    return rval
-
-def gram_projection(G_orig_repr:np.array,  G_orig:np.array=None, G_repr:np.array=None, method:str = "representer"):
-    if method == "representer":
-        return np.argmin(rkhs_gram_cdist(G_orig_repr, G_repr, G_orig), 0)
-    elif method == "pos_proj":
-        assert G_repr is not None
-        s = G_orig_repr.shape
-        n_pref = np.prod(np.array(s))
-        def cost(M):
-            M = M.reshape(s)
-            return np.trace(rkhs_gram_cdist_ignore_const(G_orig_repr @ M.T, M @ G_repr@ M.T))
-
-        res = osp.optimize.minimize(__casted_output(cost),
-                               rand(n_pref)+ 0.0001,
-                               jac = __casted_output(grad(cost)),
-                               bounds = [(0., None)] * n_pref)
-        return res["x"].reshape(s)
-    else:
-        assert False, "No valid method selected"
-
 def distr_estimate_optimization(kernel, support_points, est="support"):
+    def __casted_output(function):
+        return lambda x: onp.asarray(function(x), dtype=np.float64)
     G = kernel(support_points).astype(np.float64)
 
     if est == "support":
@@ -290,17 +221,21 @@ VrightT = TypeVar("VrightT", bound=Vec)
 VleftT = TypeVar("VleftT", bound=Vec)
 
 class CombVec(Vec, Generic[VrightT, VleftT]):
-    def __init__(self, vR:VrightT, vL:VleftT, operation, reduce:List[Reduce] = []):
-        assert(len(vR) == len(vL))
-        self.__len = Reduce.final_len(len(vR), reduce)
-        (self.vR, self.vL) = (vR, vL)
-        self.combine = operation
-        self._reduce = reduce
+    vR:VrightT
+    vL:VleftT
+    operation:callable
+    reduce:List[Reduce] = []
+
+
+    def setup(self,):
+        assert(len(self.vR) == len(self.vL))
+        self.__len = self.variable("__len", lambda pts, red: Reduce.final_len(len(pts), red), self.vR, self.reduce)
+
     
     def reduce_gram(self, gram, axis = 0):
         carry = gram
-        if self._reduce is not None:
-            for gr in self._reduce:
+        if self.reduce is not None:
+            for gr in self.reduce:
                 carry = gr(carry, axis)
         return carry
 
@@ -309,15 +244,15 @@ class CombVec(Vec, Generic[VrightT, VleftT]):
             Y = self
         else:
             assert(Y.combine == self.combine)
-        return self.reduce_gram(Y.reduce_gram(self.combine(self.vR.inner(Y.vR), self.vL.inner(Y.vL)), 1), 0)
+        return self.reduce_gram(Y.reduce_gram(self.operation(self.vR.inner(Y.vR), self.vL.inner(Y.vL)), 1), 0)
     
     def extend_reduce(self, r:List[Reduce]) -> "CombVec":
         if r is None or len(r) == 0:
             return self
         else:
-            _r = copy(self._reduce)
+            _r = copy(self.reduce)
             _r.extend(r)
-            return CombVec(self.vR, self.vL, self.combine, _r)
+            return CombVec(self.vR, self.vL, self.operation, _r)
 
     def centered(self) -> "CombVec":
         return self.extend_reduce([Center()])

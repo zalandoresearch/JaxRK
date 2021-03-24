@@ -8,11 +8,11 @@ Shape = Tuple[int]
 Dtype = Any
 Array = Any
 
-InitFn = Callable[..., Array]
+InitFn = Callable[..., Any]
 
-ConstOrInitFn = Union[float, Array, InitFn]
+ConstOrInitFn = Union[float, InitFn, Any]
 FloatOrInitFn = Union[float, InitFn]
-ArrayOrInitFn = Union[float, InitFn]
+AnyOrInitFn = Union[Any, InitFn]
 
 
 class Bijection(object):
