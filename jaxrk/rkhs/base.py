@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
+from jaxrk.core import Module
+import flax.linen as ln
+from typing import NewType, TypeVar, Generic, Sized, Union
 
-from typing import NewType, TypeVar, Generic, Sized
 
-class RkhsObject(object):
-    pass
-
-class Vec(RkhsObject, Sized):
+class Vec(Sized, Module):
     @abstractmethod
     def reduce_gram(self, gram, axis = 0):
         pass
@@ -21,12 +20,14 @@ class Vec(RkhsObject, Sized):
 InpVecT = TypeVar("InpVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
 
+#The following is input to a map RhInpVectT -> InpVecT
+RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
 
-class Map(RkhsObject, Generic[InpVecT, OutVecT]):
-    """A vectorized map from InpVecT vectors to OutVecT vectors.
-    """
+CombT = TypeVar("CombT", "LinOp[RhInpVectT, InpVecT]", InpVecT, np.array)
+
+
+class LinOp(Vec, Generic[InpVecT, OutVecT]):
     @abstractmethod
-    def __len__(self):
+    def __matmul__(self, right_inp:CombT) -> Union[OutVecT, "LinOp[RhInpVectT, OutVecT]"]:
         pass
-    
 

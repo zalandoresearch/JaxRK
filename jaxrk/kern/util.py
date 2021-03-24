@@ -4,7 +4,7 @@ from jaxrk.core import Module
 from jaxrk.core.constraints import SoftPlus
 from jaxrk.core.init_fn import ConstFn
 from jaxrk.core.typing import *
-from jaxrk.utilities.eucldist import eucldist
+from jaxrk.utilities.distances import dist
 
 class NoScaler(Module):
     def __call__(self, inp):
@@ -83,5 +83,5 @@ class ScaledPairwiseDistance(Module):
             sY = None
             if Y is not None:
                 sY = self.ds(Y)
-            dists = self.gs(eucldist(self.ds(X), sY, power = self.power))
+            dists = self.gs(dist(self.ds(X), sY, power = self.power))
         return dists

@@ -17,7 +17,9 @@ from numpy.random import rand
 
 from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.kern import Kernel
-from jaxrk.utilities.rkhsdist import rkhs_cdist, rkhs_cdist_ignore_const
+from jaxrk.utilities.rkhsdist import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const
+
+
 
 from .base import Map, RkhsObject, Vec
 
@@ -33,18 +35,15 @@ class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
-    def __init__(self, kern:Kernel, inspace_points, reduce:List[Reduce] = None):
-        row_splits = None
-        self.k = kern
-        self.inspace_points = inspace_points
-        assert(len(self.inspace_points.shape) == 2)
-        final_len = Reduce.final_len(len(inspace_points), reduce)
-        if reduce is None:
-            reduce = []# Prefactors(np.ones(final_len)/final_len)
-            self.is_simple = True
-        self.reduce = reduce
+    k:Kernel
+    insp_pts:Any
+    reduce:List[Reduce] = []
+    def setup(self, ):
+        assert(len(self.insp_pts.shape) == 2)
+        if self.reduce is None:
+            self.reduce = []
 
-        self.__len = final_len
+        self.__len = Reduce.final_len(len(self.insp_pts), reduce)
         
         self.prngkey = jax.random.PRNGKey(np.int64(time()))
         self._raw_gram_cache = None
@@ -52,7 +51,7 @@ class FiniteVec(Vec):
     def __eq__(self, other):
         assert False, "not yet implemented checking equality of reduce"
         return (isinstance(other, self.__class__) and
-                np.all(other.inspace_points == self.inspace_points) and
+                np.all(other.inspace_points == self.insp_pts) and
                 other.k == self.k)
 
     def __len__(self):
@@ -66,12 +65,12 @@ class FiniteVec(Vec):
             raise ValueError(
                 "Ambiguous inputs: `diagonal` and `y` are not compatible.")
         if not full:
-            return  self.reduce_gram(self.reduce_gram(self.k(self.inspace_points, full = full), axis = 0), axis = 1)
+            return  self.reduce_gram(self.reduce_gram(self.k(self.insp_pts, full = full), axis = 0), axis = 1)
         if Y is not None:
             assert(self.k == Y.k)
         else:
             Y = self
-        gram = self.k(self.inspace_points, Y.inspace_points).astype(float)
+        gram = self.k(self.insp_pts, Y.insp_pts).astype(float)
         r1 = self.reduce_gram(gram, axis = 0)
         r2 = Y.reduce_gram(r1, axis = 1)
         return r2
@@ -84,18 +83,17 @@ class FiniteVec(Vec):
         elif isinstance(r[-1], LinearReduce):
             p = r[-1].linear_map/np.sum(r[-1].linear_map, 1, keepdims=True)
             return self.updated(p)
-            #return FiniteVec(self.k, self.inspace_points, self.reduce[:-1]).extend_reduce([LinearReduce(p)])
         else:
             assert False
             p = np.ones(len(self))/ len(self)
         
     
     def __getitem__(self, index):
-        return FiniteVec(self.k, self.inspace_points[index], self.prefactors[index])
+        return FiniteVec(self.k, self.insp_pts[index], self.prefactors[index])
     
     def __getitem_balanced__(self, index):
         start, stop = (index * self.points_per_split, index+1 * self.points_per_split)
-        return FiniteVec(self.k, self.inspace_points[start, stop], self.prefactors[start, stop], points_per_split = self.points_per_split)
+        return FiniteVec(self.k, self.insp_pts[start, stop], self.prefactors[start, stop], points_per_split = self.points_per_split)
     
     def __getitem_ragged__(self, index):
         raise NotImplementedError()
@@ -104,7 +102,7 @@ class FiniteVec(Vec):
         _r = copy(self.reduce)
         previous_reduction = None
         if len(_r) > 0 and (isinstance(_r[-1], Prefactors) or isinstance(_r[-1], LinearReduce)):
-            final_len = Reduce.final_len(len(self.inspace_points), _r)
+            final_len = Reduce.final_len(len(self.insp_pts), _r)
             assert (final_len == prefactors.shape[0]) or (final_len == 1 and len(prefactors.shape) == 1)
             previous_reduction = _r[-1]
             _r = _r[:-1]
@@ -116,7 +114,7 @@ class FiniteVec(Vec):
             assert previous_reduction is None or isinstance(previous_reduction, LinearReduce)   
             assert len(self) == prefactors.shape[0]
             _r.append(LinearReduce(prefactors))
-        return FiniteVec(self.k, self.inspace_points, _r)
+        return FiniteVec(self.k, self.insp_pts, _r)
 
     def centered(self) -> "FiniteVec":
         return self.extend_reduce([Center()])
@@ -127,19 +125,19 @@ class FiniteVec(Vec):
         else:
             _r = copy(self.reduce)
             _r.extend(r)
-            return FiniteVec(self.k, self.inspace_points, _r)
+            return FiniteVec(self.k, self.insp_pts, _r)
 
     def reduce_gram(self, gram, axis = 0):
         return Reduce.apply(gram, self.reduce, axis) 
     
     def nsamps(self, mean = False) -> np.ndarray:
-        n = len(self.inspace_points)
+        n = len(self.insp_pts)
         rval = Reduce.apply(np.ones(n)[:, None] * n, self.reduce, 0) 
         return rval.mean() if mean else rval
     
     def get_mean_var(self, keepdims = False) -> np.ndarray:
-        mean = self.reduce_gram(self.inspace_points, 0)
-        variance_of_expectations = self.reduce_gram(self.inspace_points**2, 0) - mean**2
+        mean = self.reduce_gram(self.insp_pts, 0)
+        variance_of_expectations = self.reduce_gram(self.insp_pts**2, 0) - mean**2
         var = self.k.get_var() + variance_of_expectations
 
         if keepdims:
@@ -169,7 +167,7 @@ class FiniteVec(Vec):
     @property
     def _raw_gram(self):
         if self._raw_gram_cache is None:
-            self._raw_gram_cache = self.k(self.inspace_points).astype(np.float64)
+            self._raw_gram_cache = self.k(self.insp_pts).astype(np.float64)
         return self._raw_gram_cache
     
     def point_representant(self, method:str = "inspace_point", keepdims:bool=False):
@@ -177,7 +175,7 @@ class FiniteVec(Vec):
             assert isinstance(self.reduce[-1], Prefactors) or isinstance(self.reduce[-1], LinearReduce)
             G_orig_repr = Reduce.apply(self._raw_gram, self.reduce, 1)
             repr_idx = gram_projection(G_orig_repr, Reduce.apply(G_orig_repr, self.reduce, 0), self._raw_gram, method = "representer").squeeze()
-            rval = self.inspace_points[repr_idx,:]
+            rval = self.insp_pts[repr_idx,:]
         elif method == "mean":
             rval = self.get_mean_var(keepdims=keepdims)[0]
         else:
@@ -199,7 +197,7 @@ class FiniteVec(Vec):
         assert(len(self) == 1)
         if nsamps is None:
             lin_map = gram_projection(Reduce.apply(self._raw_gram, self.reduce, 0), G_repr = self._raw_gram, method = "pos_proj")
-            return FiniteVec(self.k, self.inspace_points, [LinearReduce(lin_map)])
+            return FiniteVec(self.k, self.insp_pts, [LinearReduce(lin_map)])
         else:
             assert False, "Frank-Wolfe needs attention."
             #the problem are circular imports.
@@ -218,10 +216,10 @@ class FiniteVec(Vec):
         """Compute RKHS distance between RKHS elements in vector self and in vector other.
         """
 
-        if self == other:
-            return rkhs_cdist(self.inner(other))
+        if self == other or other is None:
+            return rkhs_gram_cdist(self.inner(), power = norm_power)
         else:
-            return rkhs_cdist(self.inner(other), self.inner(), other.inner())
+            return rkhs_gram_cdist(self.inner(other), self.inner(), other.inner(), power = norm_power)
 
     def rvs(self, nsamps:int = 1) -> np.array:
         assert np.all(self.prefactors >= 0.)
@@ -236,7 +234,7 @@ class FiniteVec(Vec):
         resid = resid - logsumexp(resid)
         count = count + onp.random.multinomial(nsamps - count.sum(), exp(resid))
 
-        rval = np.repeat(self.inspace_points, count, 0) + self.k.rvs(nsamps, self.inspace_points.shape[1])
+        rval = np.repeat(self.insp_pts, count, 0) + self.k.rvs(nsamps, self.insp_pts.shape[1])
         return rval
 
     
@@ -255,14 +253,14 @@ def choose_representer_from_gram(G, factors):
 
 def gram_projection(G_orig_repr:np.array,  G_orig:np.array=None, G_repr:np.array=None, method:str = "representer"):
     if method == "representer":
-        return np.argmin(rkhs_cdist(G_orig_repr, G_repr, G_orig), 0)
+        return np.argmin(rkhs_gram_cdist(G_orig_repr, G_repr, G_orig), 0)
     elif method == "pos_proj":
         assert G_repr is not None
         s = G_orig_repr.shape
         n_pref = np.prod(np.array(s))
         def cost(M):
             M = M.reshape(s)
-            return np.trace(rkhs_cdist_ignore_const(G_orig_repr @ M.T, M @ G_repr@ M.T))
+            return np.trace(rkhs_gram_cdist_ignore_const(G_orig_repr @ M.T, M @ G_repr@ M.T))
 
         res = osp.optimize.minimize(__casted_output(cost),
                                rand(n_pref)+ 0.0001,
@@ -288,14 +286,14 @@ def distr_estimate_optimization(kernel, support_points, est="support"):
 
     return res["x"]/res["x"].sum()
 
-V1T = TypeVar("V1T", bound=Vec)
-V2T = TypeVar("V2T", bound=Vec)
+VrightT = TypeVar("VrightT", bound=Vec)
+VleftT = TypeVar("VleftT", bound=Vec)
 
-class CombVec(Vec, Generic[V1T, V2T]):
-    def __init__(self, v1:V1T, v2:V2T, operation, reduce:List[Reduce] = []):
-        assert(len(v1) == len(v2))
-        self.__len = Reduce.final_len(len(v1), reduce)
-        (self.v1, self.v2) = (v1, v2)
+class CombVec(Vec, Generic[VrightT, VleftT]):
+    def __init__(self, vR:VrightT, vL:VleftT, operation, reduce:List[Reduce] = []):
+        assert(len(vR) == len(vL))
+        self.__len = Reduce.final_len(len(vR), reduce)
+        (self.vR, self.vL) = (vR, vL)
         self.combine = operation
         self._reduce = reduce
     
@@ -306,12 +304,12 @@ class CombVec(Vec, Generic[V1T, V2T]):
                 carry = gr(carry, axis)
         return carry
 
-    def inner(self, Y:"CombVec[V1T, V2T]"=None, full=True):
+    def inner(self, Y:"CombVec[VrightT, VleftT]"=None, full=True):
         if Y is None:
             Y = self
         else:
             assert(Y.combine == self.combine)
-        return self.reduce_gram(Y.reduce_gram(self.combine(self.v1.inner(Y.v1), self.v2.inner(Y.v2)), 1), 0)
+        return self.reduce_gram(Y.reduce_gram(self.combine(self.vR.inner(Y.vR), self.vL.inner(Y.vL)), 1), 0)
     
     def extend_reduce(self, r:List[Reduce]) -> "CombVec":
         if r is None or len(r) == 0:
@@ -319,7 +317,7 @@ class CombVec(Vec, Generic[V1T, V2T]):
         else:
             _r = copy(self._reduce)
             _r.extend(r)
-            return CombVec(self.v1, self.v2, self.combine, _r)
+            return CombVec(self.vR, self.vL, self.combine, _r)
 
     def centered(self) -> "CombVec":
         return self.extend_reduce([Center()])
@@ -327,7 +325,7 @@ class CombVec(Vec, Generic[V1T, V2T]):
 
     def __len__(self):
         if self._reduce is None:
-            return len(self.v1)
+            return len(self.vR)
         else:
             return self.__len
 

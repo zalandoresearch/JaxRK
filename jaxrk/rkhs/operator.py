@@ -10,19 +10,19 @@ from scipy.optimize import minimize
 
 from jaxrk.rkhs.vector import FiniteVec, inner
 
-from .base import Map, RkhsObject, Vec
+from .base import LinOp, RkhsObject, Vec
 
 InpVecT = TypeVar("InpVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
 
-#The following is input to a map RhInpVectT -> InpVecT
+#The following is input to a LinOp RhInpVectT -> InpVecT
 RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
 
-CombT = TypeVar("CombT", "FiniteMap[RhInpVectT, InpVecT]", InpVecT, np.array)
+CombT = TypeVar("CombT", "FiniteOp[RhInpVectT, InpVecT]", InpVecT, np.array)
 
 
-class FiniteMap(Map[InpVecT, OutVecT]):
-    """Finite rank affine map in RKHS
+class FiniteOp(LinOp[InpVecT, OutVecT]):
+    """Finite rank LinOp in RKHS
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False, decenter_outp:bool = False, normalize = False, outp_bias:np.array = None):
         assert not (decenter_outp and outp_bias is not None), "Either decenter_outp == True or outp_bias != None, but not both"
@@ -54,31 +54,31 @@ class FiniteMap(Map[InpVecT, OutVecT]):
     def __len__(self):
         return len(self.inp_feat)
 
-    def __matmul__(self, inp:CombT) -> RkhsObject:
-        if isinstance(inp, FiniteMap):
-            G = inner(self.inp_feat, inp.outp_feat)
+    def __matmul__(self, right_inp:CombT) -> RkhsObject:
+        if isinstance(right_inp, FiniteOp):
+            G = inner(self.inp_feat, right_inp.outp_feat)
             
-            if not inp.debias_outp:
-                matr = self.matr @ G @ inp.matr
-                inp_bias = (matr @ inp.bias.T).T
+            if not right_inp.debias_outp:
+                matr = self.matr @ G @ right_inp.matr
+                inp_bias = (matr @ right_inp.bias.T).T
             else:
-                matr = self.matr @ (G - G @ inp.bias.T) @ inp.matr
-                inp_bias = (self.matr @ G @ inp.bias.T).T
+                matr = self.matr @ (G - G @ right_inp.bias.T) @ right_inp.matr
+                inp_bias = (self.matr @ G @ right_inp.bias.T).T
 
-            rval = FiniteMap(inp.inp_feat, self.outp_feat, matr, outp_bias=self.bias + inp_bias)
-            rval.mean_center_inp = inp.mean_center_inp
+            rval = FiniteOp(right_inp.inp_feat, self.outp_feat, matr, outp_bias=self.bias + inp_bias)
+            rval.mean_center_inp = right_inp.mean_center_inp
             return rval
         else:
-            if isinstance(inp, DeviceArray):
-                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))  
-            lin_map = (self.matr @ inner(self.inp_feat, inp)).T
+            if isinstance(right_inp, DeviceArray):
+                right_inp = FiniteVec(self.inp_feat.k, np.atleast_2d(right_inp))  
+            lin_LinOp = (self.matr @ inner(self.inp_feat, right_inp)).T
             if self.debias_outp:
-                r = [DecenterOutFeat(lin_map)]
+                r = [DecenterOutFeat(lin_LinOp)]
             else:
                 if self._normalize:
-                    lin_map = lin_map / lin_map.sum(1, keepdims = True)
-                r = [LinearReduce(lin_map + self.bias)]
-            if len(inp) == 1:
+                    lin_LinOp = lin_LinOp / lin_LinOp.sum(1, keepdims = True)
+                r = [LinearReduce(lin_LinOp + self.bias)]
+            if len(right_inp) == 1:
                 r.append(Sum())
             rval = self.outp_feat.extend_reduce(r)
             return rval
@@ -94,14 +94,14 @@ class FiniteMap(Map[InpVecT, OutVecT]):
 
 
 
-class CrossCovOp(FiniteMap[InpVecT, OutVecT]):
+class CrossCovOp(FiniteOp[InpVecT, OutVecT]):
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
         super().__init__(inp_feat, outp_feat, np.diag((inp_feat.prefactors + outp_feat.prefactors)/2))
         assert len(inp_feat) == len(outp_feat)
         assert np.allclose(inp_feat.prefactors, outp_feat.prefactors)
         self.regul = regul
 
-class CovOp(FiniteMap[InpVecT, InpVecT]):
+class CovOp(FiniteOp[InpVecT, InpVecT]):
     def __init__(self, inp_feat:InpVecT, regul = 0.01, center = False):
         if center:
             inp_feat = inp_feat.centered()
@@ -183,15 +183,15 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
         """If `inp` is an RKHS vector of length 1 (a mean embedding): Solve the inverse problem to find dP/dρ from equation
         μ_P = C_ρ dP/dρ
         where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `inp`.
-        If `inp` is a `FiniteMap`: Solve the inverse problem to find operator B from equation
+        If `inp` is a `FiniteOp`: Solve the inverse problem to find operator B from equation
         A = C_ρ B
         where C_ρ is the covariance operator represented by this object (`self`), and A is given by `inp`.
         
         Args:
-            inp (InpVecT): The embedding of the distribution of interest, or the map of interest.
+            inp (InpVecT): The embedding of the distribution of interest, or the LinOp of interest.
         """
         
-        if isinstance(inp, FiniteMap):
+        if isinstance(inp, FiniteOp):
             reg_inp = inp.outp_feat
         else:
             if isinstance(inp, DeviceArray):
@@ -210,7 +210,7 @@ class CovOp(FiniteMap[InpVecT, InpVecT]):
 
         
 
-class Cmo(FiniteMap[InpVecT, OutVecT]):
+class Cmo(FiniteOp[InpVecT, OutVecT]):
     """conditional mean operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, center = False, regul_func = None):
@@ -226,7 +226,7 @@ class Cmo(FiniteMap[InpVecT, OutVecT]):
             matr = regul_func(G)
         super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center, decenter_outp = center)
 
-class Cdo(FiniteMap[InpVecT, OutVecT]):
+class Cdo(FiniteOp[InpVecT, OutVecT]):
     """conditional density operator
     """
     def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
@@ -240,7 +240,7 @@ class Cdo(FiniteMap[InpVecT, OutVecT]):
                          mean_center_inp = center, decenter_outp = False, normalize=True)
 
 
-class HsTo(FiniteMap[InpVecT, InpVecT]): 
+class HsTo(FiniteOp[InpVecT, InpVecT]): 
     """RKHS transfer operators
     """
     def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = True, koopman = False):

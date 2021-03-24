@@ -24,7 +24,7 @@ from jaxrk.core import Module
 
 class Kernel(Module):
     """A generic kernel type."""
-    def __call__(self, X, Y = None, diag = False) -> np.array:
+    def __call__(self, X, Y = None, diag:bool = False) -> np.array:
         """Compute the gram matrix, i.e. the kernel evaluated at every element of X paired with each element of Y (if not None, otherwise each element of X).
 
         Args:

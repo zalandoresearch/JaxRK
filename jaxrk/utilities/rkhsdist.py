@@ -1,8 +1,8 @@
 import jax.numpy as np
 
-__all__ = ["rkhs_cdist", "rkhs_cdist_ignore_const"]
+__all__ = ["rkhs_gram_cdist", "rkhs_gram_cdist_ignore_const"]
 
-def rkhs_cdist(G_ab:np.array, G_a:np.array=None, G_b:np.array=None, power:float = 2.):
+def rkhs_gram_cdist(G_ab:np.array, G_a:np.array=None, G_b:np.array=None, power:float = 2.):
     assert len(G_ab.shape)==2
     if G_a is not None:
         assert len(G_a.shape) == 2 and G_a.shape[0] == G_a.shape[1] and G_ab.shape[0] == G_a.shape[0]
@@ -15,16 +15,16 @@ def rkhs_cdist(G_ab:np.array, G_a:np.array=None, G_b:np.array=None, power:float 
         assert np.all(G_ab == G_ab.T)
         #representer 
         G_a = G_b = G_ab
-    return rkhs_cdist_unchecked(G_ab, G_a, G_b, power)
+    return rkhs_gram_cdist_unchecked(G_ab, G_a, G_b, power)
 
-def rkhs_cdist_ignore_const(G_ab:np.array, G_b:np.array, power:float = 2.):
+def rkhs_gram_cdist_ignore_const(G_ab:np.array, G_b:np.array, power:float = 2.):
     sqdist = np.diagonal(G_b)[np.newaxis, :] - 2 * G_ab
     if power == 2.:
         return sqdist
     else:
         return np.power(sqdist, power / 2.)
 
-def rkhs_cdist_unchecked(G_ab:np.array, G_a:np.array, G_b:np.array, power:float = 2.):
+def rkhs_gram_cdist_unchecked(G_ab:np.array, G_a:np.array, G_b:np.array, power:float = 2.):
     sqdist = np.diagonal(G_a)[:, np.newaxis] + np.diagonal(G_b)[np.newaxis, :] - 2 * G_ab
     if power == 2.:
         return sqdist

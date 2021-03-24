@@ -53,6 +53,23 @@ class Reduce(Callable, ABC, Module):
                 carry = gr.new_len(carry)
         return carry
 
+# class SeqReduce(Reduce):
+#     children:List[Reduce]
+    
+#     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
+#         carry = np.swapaxes(inp, axis, 0)
+#         if self.children is not None:
+#             for gr in self.children:
+#                 carry = gr.reduce_first_ax(carry)
+#         return np.swapaxes(carry, axis, 0)
+    
+#     def new_len(self, original_len:int):
+#         carry = original_len
+#         if self.children is not None:
+#             for gr in self.children:
+#                 carry = gr.new_len(carry)
+#         return carry
+
 class NoReduce(Reduce):
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         return inp
