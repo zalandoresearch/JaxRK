@@ -9,6 +9,7 @@ from jax.interpreters.xla import DeviceArray
 from scipy.optimize import minimize
 
 from jaxrk.rkhs.vector import FiniteVec, inner
+from jaxrk.core.typing import AnyOrInitFn
 
 from .base import LinOp, RkhsObject, Vec
 
@@ -24,64 +25,57 @@ CombT = TypeVar("CombT", "FiniteOp[RhInpVectT, InpVecT]", InpVecT, np.array)
 class FiniteOp(LinOp[InpVecT, OutVecT]):
     """Finite rank LinOp in RKHS
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:np.array, mean_center_inp:bool = False, decenter_outp:bool = False, normalize = False, outp_bias:np.array = None):
-        assert not (decenter_outp and outp_bias is not None), "Either decenter_outp == True or outp_bias != None, but not both"
-        self.matr = matr
-        self.mean_center_inp = mean_center_inp
+    inp_feat:InpVecT
+    outp_feat:OutVecT
+    matr_init:AnyOrInitFn
+    normalize:bool = False
 
-        if not mean_center_inp:
-            self.inp_feat = inp_feat
-            self.outp_feat = outp_feat
-        else:
-            self.inp_feat = inp_feat.extend_reduce([CenterInpFeat(inp_feat.inner())])
-            self.outp_feat = outp_feat
-        self._normalize = normalize
+    def setup(self, ):
+        self.matr = self.const_or_param("matr", self.matr_init)
 
-        self.debias_outp = decenter_outp
-        if decenter_outp:            
-            outp_bias = np.ones((1, len(outp_feat)) ) / len(outp_feat)
-        else:
-            outp_bias = np.zeros((1, len(outp_feat)))
-
-        if outp_bias is not None:
-            assert outp_bias.shape[1] == len(outp_feat)
-            if len(outp_bias.squeeze().shape) == 1:
-                self.bias = outp_bias.squeeze()[np.newaxis, :]
-            else:
-                assert outp_bias.shape[0]  == len(outp_feat) 
-                self.bias = outp_bias
-    
     def __len__(self):
-        return len(self.inp_feat)
+        return len(self.inp_feat) * len(self.outp_feat)
 
     def __matmul__(self, right_inp:CombT) -> RkhsObject:
         if isinstance(right_inp, FiniteOp):
-            G = inner(self.inp_feat, right_inp.outp_feat)
-            
-            if not right_inp.debias_outp:
-                matr = self.matr @ G @ right_inp.matr
-                inp_bias = (matr @ right_inp.bias.T).T
-            else:
-                matr = self.matr @ (G - G @ right_inp.bias.T) @ right_inp.matr
-                inp_bias = (self.matr @ G @ right_inp.bias.T).T
-
-            rval = FiniteOp(right_inp.inp_feat, self.outp_feat, matr, outp_bias=self.bias + inp_bias)
-            rval.mean_center_inp = right_inp.mean_center_inp
+            matr = self.matr @ self.inp_feat.inner(right_inp.outp_feat) @ right_inp.matr
+            rval = FiniteOp(right_inp.inp_feat, self.outp_feat, matr)
             return rval
         else:
             if isinstance(right_inp, DeviceArray):
                 right_inp = FiniteVec(self.inp_feat.k, np.atleast_2d(right_inp))  
             lin_LinOp = (self.matr @ inner(self.inp_feat, right_inp)).T
-            if self.debias_outp:
-                r = [DecenterOutFeat(lin_LinOp)]
-            else:
-                if self._normalize:
-                    lin_LinOp = lin_LinOp / lin_LinOp.sum(1, keepdims = True)
-                r = [LinearReduce(lin_LinOp + self.bias)]
+            if self._normalize:
+                lin_LinOp = lin_LinOp / lin_LinOp.sum(1, keepdims = True)
+            r = [LinearReduce(lin_LinOp)]
             if len(right_inp) == 1:
                 r.append(Sum())
             rval = self.outp_feat.extend_reduce(r)
             return rval
+    
+    def inner(self, Y:"FiniteOp[InpVecT, OutVecT]"=None, full=True):
+        assert NotImplementedError("This implementation as to be tested")
+        if Y is None:
+            Y = self
+        G_i = self.inp_feat.inner(Y.inp_feat)
+        G_o = self.outp_feat.inner(Y.outp_feat)
+
+        # check the following expression again
+        if Y.matr.size < self.matr.size:
+            return np.sum((G_o.T @ self.matr @ G_i) * Y.matr)
+        else:
+            return np.sum((G_o @ Y.matr @ G_i.T) * self.matr)
+
+        # is the kronecker product taken the right way around or do self and Y have to switch plaches?
+        #return self.reduce_gram(Y.reduce_gram(G_i.T.reshape(1, -1) @ np.kron(self.matr, Y.matr) @ G_o.reshape(1, -1), 1), 0)
+    
+    
+    def reduce_gram(self, gram, axis = 0):
+        return gram
+    
+    @property
+    def T(self) -> FiniteOp[OutVecT, InpVecT]:
+        return FiniteOp(self.outp_feat, self.inp_feat, self.matr.T, self.normalize)
 
     def __call__(self, inp:DeviceArray) -> RkhsObject:
         return self @ FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
@@ -94,39 +88,17 @@ class FiniteOp(LinOp[InpVecT, OutVecT]):
 
 
 
-class CrossCovOp(FiniteOp[InpVecT, OutVecT]):
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul = 0.01):
-        super().__init__(inp_feat, outp_feat, np.diag((inp_feat.prefactors + outp_feat.prefactors)/2))
-        assert len(inp_feat) == len(outp_feat)
-        assert np.allclose(inp_feat.prefactors, outp_feat.prefactors)
-        self.regul = regul
+def CrossCovOp(inp_feat:InpVecT, outp_feat:OutVecT) -> FiniteOp[InpVecT, OutVecT]:
+    assert len(inp_feat) == len(outp_feat)
+    return FiniteOp(inp_feat, outp_feat, np.eye(len(inp_feat)))
 
-class CovOp(FiniteOp[InpVecT, InpVecT]):
-    def __init__(self, inp_feat:InpVecT, regul = 0.01, center = False):
-        if center:
-            inp_feat = inp_feat.centered()
-        out_feat = inp_feat
-        # if len(inp_feat.reduce) > 0 and isinstance(inp_feat.reduce[-1], Prefactors):
-        #     matr = np.diag(inp_feat.reduce[-1].prefactors)
-        #     reduce = copy(inp_feat.reduce)
-        #     reduce[-1] = Prefactors(np.ones(len(inp_feat)))
-        #     out_feat = FiniteVec(inp_feat.k, inp_feat.inspace_points, reduce)
-        # else:
-        #     matr = np.diag(np.ones(len(inp_feat)))
-        super().__init__(inp_feat,
-                         out_feat,
-        #                 matr,
-                         np.eye(len(inp_feat)))
-        self.inp_feat = self.outp_feat
-        self._inv = None
-        self.regul = regul
+def CovOp(inp_feat:InpVecT) -> FiniteOp[InpVecT, InpVecT]:
+    return FiniteOp(inp_feat, inp_feat, np.eye(len(inp_feat)))
     
-    @classmethod
-    def from_Samples(cls, kern, inspace_points, prefactors = None, regul = 0.01):
-        return cls(FiniteVec(kern, inspace_points, prefactors), regul = regul)
+def CovOp_from_Samples(kern, inspace_points, prefactors = None) -> FiniteOp[InpVecT, InpVecT]:
+    return CovOp(FiniteVec(kern, inspace_points, prefactors))
     
-    @classmethod
-    def regul(cls, nsamps:int, nrefsamps:int = None, a:float = 0.49999999999999, b:float = 0.49999999999999, c:float = 0.1):
+def Cov_regul(nsamps:int, nrefsamps:int = None, a:float = 0.49999999999999, b:float = 0.49999999999999, c:float = 0.1):
         """Compute the regularizer based on the formula from the Kernel Conditional Density operators paper (Schuster et al., 2020, Corollary 3.4).
         
         smaller c => larger bias, tighter stochastic error bounds
@@ -152,116 +124,60 @@ class CovOp(FiniteOp[InpVecT, InpVecT]):
         
         return max(nrefsamps**(-b*c), nsamps**(-2*a*c))
 
-    def inv(self, regul:float = None) -> "CovOp[InpVecT, InpVecT]":
-        """Compute the inverse of this covariance operator with a certain regularization.
+def Cov_inv(cov:FiniteOp[InpVecT, InpVecT], regul:float = None) -> "FiniteOp[InpVecT, InpVecT]":
+    """Compute the inverse of this covariance operator with a certain regularization.
 
-        Args:
-            regul (float, optional): Regularization parameter to be used. Defaults to self.regul.
+    Args:
+        regul (float, optional): Regularization parameter to be used. Defaults to self.regul.
 
-        Returns:
-            CovOp[InpVecT, InpVecT]: The inverse operator
-        """
-        set_inv = False
-        rval = self._inv
-
-        if regul is None:
-            set_inv = True
-            regul = self.regul        
-        print("regul=", regul)
-        if self._inv is None or set_inv:
-            inv_gram = np.linalg.inv(inner(self.inp_feat) + regul * np.eye(len(self.inp_feat), dtype = self.matr.dtype))
-            matr = (self.matr @ self.matr @ inv_gram @ inv_gram)
-            rval = CovOp(self.inp_feat, regul)
-            rval.matr = matr
-            rval._inv = self
-            
-        if set_inv:
-            self._inv = rval
-        return rval
-    
-    def solve(self, inp:CombT) -> RkhsObject:
-        """If `inp` is an RKHS vector of length 1 (a mean embedding): Solve the inverse problem to find dP/dρ from equation
-        μ_P = C_ρ dP/dρ
-        where C_ρ is the covariance operator represented by this object (`self`), ρ is the reference distribution, and μ_P is given by `inp`.
-        If `inp` is a `FiniteOp`: Solve the inverse problem to find operator B from equation
-        A = C_ρ B
-        where C_ρ is the covariance operator represented by this object (`self`), and A is given by `inp`.
-        
-        Args:
-            inp (InpVecT): The embedding of the distribution of interest, or the LinOp of interest.
-        """
-        
-        if isinstance(inp, FiniteOp):
-            reg_inp = inp.outp_feat
-        else:
-            if isinstance(inp, DeviceArray):
-                inp = FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
-            #assert(len(inp) == 1)
-            reg_inp = inp
-
-        regul = CovOp.regul(max(reg_inp.nsamps().min(), 1), max(self.inp_feat.nsamps(True), 1))
-        return (self.inv(regul) @ inp)
-
-    def eig(self) -> FiniteVec:
-        G = self.inp_feat.inner()
-        np.linalg.eigh(self.matr @ G + np.eye(G.shape[0])/1000 )
-        
-    
-
-        
-
-class Cmo(FiniteOp[InpVecT, OutVecT]):
-    """conditional mean operator
+    Returns:
+        FiniteOp[InpVecT, InpVecT]: The inverse operator
     """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, center = False, regul_func = None):
+    assert regul is not None
+    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat), dtype = cov.matr.dtype))
+    matr = (cov.matr @ cov.matr @ inv_gram @ inv_gram)
+    rval = CovOp(cov.inp_feat)
+    rval.matr = matr
+    rval._inv = cov
+        
+    return rval
+    
+def Cov_solve(cov:FiniteOp[InpVecT, InpVecT], lhs:CombT, regul:float = None) -> RkhsObject:
+    """If `inp` is an RKHS vector of length 1 (a mean embedding): Solve the inverse problem to find dP/dρ from equation
+    μ_P = C_ρ dP/dρ
+    where C_ρ is the covariance operator passed as `cov`, ρ is the reference distribution, and μ_P is given by `lhs`.
+    If `lhs` is a `FiniteOp`: Solve the inverse problem to find operator B from equation
+    A = C_ρ B
+    where C_ρ is the covariance operator passed as `cov`, and A is given by `lhs`.
+    
+    Args:
+        lhs (CombT): The embedding of the distribution of interest, or the LinOp of interest.
+    """
+    
+    if isinstance(lhs, FiniteOp):
+        reg_inp = lhs.outp_feat
+    else:
+        if isinstance(lhs, DeviceArray):
+            lhs = FiniteVec(cov.inp_feat.k, np.atleast_2d(lhs))
+        reg_inp = lhs
+    if regul is None:
+        regul = Cov_regul(max(reg_inp.nsamps().min(), 1), max(cov.inp_feat.nsamps(True), 1))
+    return (Cov_inv(cov, regul) @ lhs)
+
+def Cmo(inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01) -> FiniteOp[InpVecT, OutVecT]:
         regul = np.array(regul, dtype=np.float32)
 
         #we do not center the output features - this still leads to the correct results in the output of the CME
-        c_inp_feat = inp_feat.centered() if center else inp_feat
+        c_inp_feat = inp_feat
         G = inner(c_inp_feat)
-        if regul_func is None:
-            assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)       
-            matr = np.linalg.inv(G + regul * np.eye(len(inp_feat)))
-        else:
-            matr = regul_func(G)
-        super().__init__(inp_feat, outp_feat, matr, mean_center_inp=center, decenter_outp = center)
+        assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)       
+        matr = np.linalg.inv(G + regul * np.eye(len(inp_feat)))
+        return  FiniteOp(inp_feat, outp_feat, matr)
 
-class Cdo(FiniteOp[InpVecT, OutVecT]):
-    """conditional density operator
-    """
-    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01, center:bool = False):
-        #if center:
-        #    outp_feat = outp_feat.extend_reduce([DecenterOutFeat(np.eye(len(outp_feat)))])
-        mo = Cmo(inp_feat, outp_feat, regul, center = center)
-        matr = CovOp(ref_feat, regul).solve(mo).matr
-        super().__init__(mo.inp_feat,
+def Cdo(inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01,) -> FiniteOp[InpVecT, OutVecT]:
+        mo = Cmo(inp_feat, outp_feat, regul)
+        matr = Cov_solve(CovOp(ref_feat), mo, regul).matr
+        return FiniteOp(mo.inp_feat,
                          ref_feat,
                          matr,
-                         mean_center_inp = center, decenter_outp = False, normalize=True)
-
-
-class HsTo(FiniteOp[InpVecT, InpVecT]): 
-    """RKHS transfer operators
-    """
-    def __init__(self, start_feat:InpVecT, timelagged_feat:InpVecT, regul = 0.01, embedded = True, koopman = False):
-        self.embedded = embedded
-        self.koopman = koopman
-        assert(start_feat.k == timelagged_feat.k)
-        if (embedded is True and koopman is False) or (embedded is False and koopman is True):
-            self.matr = np.linalg.inv(inner(start_feat) + timelagged_feat * regul * np.eye(len(start_feat)))
-        else:
-            G_xy = inner(start_feat, timelagged_feat)
-            G_x = inner(start_feat)
-            matr = (np.linalg.pinv(G_xy)
-                         @ np.linalg.pinv(G_x+ len(timelagged_feat) * regul * np.eye(len(timelagged_feat))) 
-                         @ G_xy)
-            if koopman is True:
-                matr = self.matr.T
-
-        if koopman is False:
-            inp_feat = start_feat
-            outp_feat = timelagged_feat
-        else:
-            inp_feat = timelagged_feat
-            outp_feat = start_feat
-        super().__init__(inp_feat, outp_feat, matr)
+                         normalize=True)
