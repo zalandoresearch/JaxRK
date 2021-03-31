@@ -19,9 +19,9 @@ from jaxrk.core.typing import ConstOrInitFn
 from jaxrk.core.init_fn import ConstFn, ConstIsotropicFn
 from jaxrk.core.constraints import SoftPlus, Bijection, CholeskyBijection
 from jaxrk.utilities.views import tile_view
+from jaxrk.core import Module
 
-
-class FeatMapKernel(Kernel):
+class FeatMapKernel(Kernel, Module):
     """A kernel that is defined by a feature map.
     
     Args:
@@ -46,7 +46,7 @@ class FeatMapKernel(Kernel):
 
 LinearKernel = partial(FeatMapKernel, feat_map = lambda x:x)
 
-class DictKernel(Kernel):
+class DictKernel(Kernel, Module):
     """Kernel for a fixed dictionary of input space values and accompanying gram values. Example:
         ```
             k = DictKernel(np.array([1,3]), np.array([(2, -1), (-1, 1.2)]))

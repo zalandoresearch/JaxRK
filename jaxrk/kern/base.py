@@ -7,6 +7,7 @@ Created on Thu Jan 10 10:01:56 2019
 
 from typing import Callable
 
+from abc import abstractmethod
 import numpy as onp
 import jax.numpy as np
 import jax.scipy as sp
@@ -22,8 +23,9 @@ from jaxrk.utilities.eucldist import eucldist
 from jaxrk.core import Module
 
 
-class Kernel(Module):
+class Kernel:
     """A generic kernel type."""
+    @abstractmethod
     def __call__(self, X, Y = None, diag:bool = False) -> np.array:
         """Compute the gram matrix, i.e. the kernel evaluated at every element of X paired with each element of Y (if not None, otherwise each element of X).
 
@@ -39,9 +41,12 @@ class Kernel(Module):
 
 class DensityKernel(Kernel):
     """Type for positive definite kernels that are also densities."""
+    @abstractmethod
     def std(self):
         raise NotImplementedError()
+    @abstractmethod
     def var(self):
         raise NotImplementedError()
+    @abstractmethod
     def rvs(self, nsamps):
         raise NotImplementedError()

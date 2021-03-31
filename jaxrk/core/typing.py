@@ -1,6 +1,6 @@
 from typing import Any, Tuple, Callable, Union
 
-__all__ = ["Bijection", "PRNGKeyT", "Shape", "Dtype", "Array", "InitFn", "ConstOrInitFn", "FloatOrInitFn", "ArrayOrInitFn"]
+__all__ = ["Bijection", "PRNGKeyT", "Shape", "Dtype", "Array", "InitFn", "ConstOrInitFn", "FloatOrInitFn", "AnyOrInitFn"]
 
 
 PRNGKeyT = Any

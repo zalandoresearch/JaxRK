@@ -12,10 +12,10 @@ from scipy.stats import multivariate_normal
 
 from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
+from jaxrk.core import Module
 
 
-
-class SplitDimsKernel(Kernel):
+class SplitDimsKernel(Kernel, Module):
     intervals:Array
     kernels:List[Kernel]
     operation:Callable = lambda x: np.prod(x, 0)

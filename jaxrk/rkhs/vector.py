@@ -1,4 +1,5 @@
 from copy import copy
+from dataclasses import field
 
 from numpy.core.fromnumeric import squeeze
 from jaxrk.reduce.lincomb import LinearReduce
@@ -19,28 +20,29 @@ from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.kern import Kernel
 from jaxrk.utilities.gram import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const, gram_projection
 from jaxrk.core.typing import AnyOrInitFn
+from jaxrk.core import Module
 
 
-from .base import Map, RkhsObject, Vec
+from .base import Vec, LinOp
 
 #from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
 
 
-class FiniteVec(Vec):
+class FiniteVec(Vec, Module):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
     k:Kernel
     insp_pts_init: AnyOrInitFn
-    reduce:List[Reduce] = []
-    def setup(self, ):
-        assert(len(self.insp_pts.shape) == 2)
+    reduce:List[Reduce] = field(default_factory=list)
+
+    def setup(self, ):        
         if self.reduce is None:
             self.reduce = []
 
-        self.__len = self.variable("__len", lambda pts, red: Reduce.final_len(len(pts), red), self.insp_pts, self.reduce)
         self.insp_pts = self.const_or_param("insp_pts", self.insp_pts_init,)
-        self.prngkey = jax.random.PRNGKey(np.int64(time()))
+        assert(len(self.insp_pts.shape) == 2)
+        self.__len = self.param("__len", lambda rngkey, pts, red: Reduce.final_len(len(pts), red), self.insp_pts, self.reduce)
         self._raw_gram_cache = None
 
     def __eq__(self, other):
@@ -58,7 +60,7 @@ class FiniteVec(Vec):
     def inner(self, Y=None, full=True):
         if not full and Y is not None:
             raise ValueError(
-                "Ambiguous inputs: `diagonal` and `y` are not compatible.")
+                "Ambiguous inputs: `full` and `y` are not compatible.")
         if not full:
             return  self.reduce_gram(self.reduce_gram(self.k(self.insp_pts, full = full), axis = 0), axis = 1)
         if Y is not None:
@@ -220,11 +222,11 @@ def distr_estimate_optimization(kernel, support_points, est="support"):
 VrightT = TypeVar("VrightT", bound=Vec)
 VleftT = TypeVar("VleftT", bound=Vec)
 
-class CombVec(Vec, Generic[VrightT, VleftT]):
+class CombVec(Vec, Generic[VrightT, VleftT], Module):
     vR:VrightT
     vL:VleftT
     operation:callable
-    reduce:List[Reduce] = []
+    reduce:List[Reduce] = field(default_factory=list)
 
 
     def setup(self,):

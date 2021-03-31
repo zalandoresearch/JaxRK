@@ -87,13 +87,14 @@ class Prefactors(Reduce):
     def setup(self):
         if not isinstance(self.factors_init, Callable):
             if self.dim is None:
-                self.dim = self.factors_init.shape[0]
-            else:
-                assert self.dim == self.prefactors.shape[0]
+                dim = self.factors_init.shape[0]
+            else:                
+                dim = self.dim
         self.prefactors = self.const_or_param("prefactors", self.factors_init, (self.dim,), np.float32, )
+        assert dim == self.prefactors.shape[0]
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
-        assert self.dim == inp.shape[axis]
+        assert self.prefactors.shape[0] == inp.shape[axis]
         return inp.astype(self.prefactors.dtype) * np.expand_dims(self.prefactors, axis=(axis+1)%2)
 
     def reduce_first_ax(self, inp:np.array) -> np.array:

@@ -2,29 +2,21 @@ from copy import copy
 from jaxrk.reduce.centop_reductions import CenterInpFeat, DecenterOutFeat
 from jaxrk.reduce.lincomb import LinearReduce
 from jaxrk.reduce.base import Prefactors, Sum
-from typing import Generic, TypeVar, Callable
+from typing import Generic, TypeVar, Callable, Union
 
 import jax.numpy as np
 from jax.interpreters.xla import DeviceArray
 from scipy.optimize import minimize
 
 from jaxrk.rkhs.vector import FiniteVec, inner
+from jaxrk.core import Module
 from jaxrk.core.typing import AnyOrInitFn
 
-from .base import LinOp, RkhsObject, Vec
-
-InpVecT = TypeVar("InpVecT", bound=Vec)
-OutVecT = TypeVar("OutVecT", bound=Vec)
-
-#The following is input to a LinOp RhInpVectT -> InpVecT
-RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
-
-CombT = TypeVar("CombT", "FiniteOp[RhInpVectT, InpVecT]", InpVecT, np.array)
+from .base import LinOp, RkhsObject, Vec, InpVecT, OutVecT, RhInpVectT, CombT
 
 
-class FiniteOp(LinOp[InpVecT, OutVecT]):
-    """Finite rank LinOp in RKHS
-    """
+class FiniteOp(LinOp[InpVecT, OutVecT], Module):
+    """Finite rank LinOp in RKHS"""
     inp_feat:InpVecT
     outp_feat:OutVecT
     matr_init:AnyOrInitFn
@@ -36,7 +28,7 @@ class FiniteOp(LinOp[InpVecT, OutVecT]):
     def __len__(self):
         return len(self.inp_feat) * len(self.outp_feat)
 
-    def __matmul__(self, right_inp:CombT) -> RkhsObject:
+    def __matmul__(self, right_inp:CombT) -> Union[OutVecT, "FiniteOp[RhInpVectT, OutVecT]"]:
         if isinstance(right_inp, FiniteOp):
             matr = self.matr @ self.inp_feat.inner(right_inp.outp_feat) @ right_inp.matr
             rval = FiniteOp(right_inp.inp_feat, self.outp_feat, matr)
@@ -74,7 +66,7 @@ class FiniteOp(LinOp[InpVecT, OutVecT]):
         return gram
     
     @property
-    def T(self) -> FiniteOp[OutVecT, InpVecT]:
+    def T(self) -> "FiniteOp[OutVecT, InpVecT]":
         return FiniteOp(self.outp_feat, self.inp_feat, self.matr.T, self.normalize)
 
     def __call__(self, inp:DeviceArray) -> RkhsObject:

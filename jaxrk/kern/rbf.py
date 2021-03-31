@@ -25,19 +25,20 @@ from jaxrk.kern.base import DensityKernel, Kernel
 from jaxrk.kern.util import ScaledPairwiseDistance
 
 
-class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scipy
+class GenGaussKernel(DensityKernel, Module, ln.Module): #this is the gennorm distribution from scipy
     """Kernel derived from the pdf of the generalized Gaussian distribution (https://en.wikipedia.org/wiki/Generalized_normal_distribution#Version_1).
 
         Args:
             scale (np.array, optional): Scale parameter. Defaults to np.array([1.]).
             shape (np.array, optional): Shape parameter in the half-open interval (0,2]. Lower values result in pointier kernel functions. Shape == 2 results in usual Gaussian kernel, shape == 1 results in Laplace kernel. Defaults to np.array([2.]).
-    """
-    per_dim_scale:bool = False
-    dim:int = None
+    """    
     scale_init:ConstOrInitFn = ConstFn(np.ones(1))
-
-    shape_bij: Bijection = Sigmoid(0., 2.)
     shape_init: ConstOrInitFn = ConstFn(np.ones(1))
+
+    dim:int = None
+    per_dim_scale:bool = False    
+    
+    shape_bij: Bijection = Sigmoid(0., 2.)
 
     def setup(self):
         scale_dim = 1
@@ -79,7 +80,7 @@ LaplaceKernel = partial(GenGaussKernel, shape_init = 1.)
 #         assert(len(np.shape(X))==2)
 #         return exp(- 2* np.sin(np.pi * self.dist(X,Y, diag))**2 / self.ls**2)
 
-class PeriodicKernel(Kernel):
+class PeriodicKernel(Kernel, Module):
     lengthscale_bij: Bijection = SoftPlus()
     lengthscale_init: ConstOrInitFn = ConstFn(np.ones(1))
 
@@ -101,7 +102,7 @@ class PeriodicKernel(Kernel):
     def __call__(self, X, Y=None, diag = False,):
         return exp(-2* np.sin(self.ggkern.dist(X, Y, diag))**2 /self.ls)
 
-class ThreshSpikeKernel(Kernel):
+class ThreshSpikeKernel(Kernel, Module):
     """Takes on spike falue if squared euclidean distance is below a certain threshold, else non_spike value
 
         Args:

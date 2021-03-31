@@ -10,5 +10,5 @@ class Module(ln.Module):
             return self.param(name, init, *args, **kwargs)
         else:
             #fixed float or array
-            v = self.variable('constants', name, ConstFn(init, *args, **kwargs)) 
+            v = self.variable('constants', name, ConstFn(init), *args, **kwargs)
             return v.value
