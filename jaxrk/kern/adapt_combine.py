@@ -12,16 +12,12 @@ from scipy.stats import multivariate_normal
 
 from jaxrk.utilities.eucldist import eucldist
 from jaxrk.kern.base import DensityKernel, Kernel
-from jaxrk.core import Module
 
 
-class SplitDimsKernel(Kernel, Module):
-    intervals:Array
-    kernels:List[Kernel]
-    operation:Callable = lambda x: np.prod(x, 0)
-    weights:Array = None
-
-    def setup(self):
+class SplitDimsKernel(Kernel):
+    def __init__(self, intervals:Array, kernels:List[Kernel], operation:Callable = lambda x: np.prod(x, 0), weights:Array = None):
+        super().__init__()
+        self.intervals, self.kernels, self.operation, self.weights = intervals, kernels, operation, weights
         assert len(self.intervals) - 1 == len(self.kernels)
         assert  self.weights is None or self.weights.size == len(self.kernels)
         if self.weights is None:
@@ -39,7 +35,10 @@ class SplitDimsKernel(Kernel, Module):
                 
 
 class SKlKernel(Kernel):
-    sklearn_kernel:Any
+    
+    def __init__(self, sklearn_kernel:Any):
+        super().__init__()
+        self.sklearn_kernel = sklearn_kernel
 
     def __call__(self, X, Y=None, diag = False):
         if diag:

@@ -9,41 +9,51 @@ from jax.interpreters.xla import DeviceArray
 from scipy.optimize import minimize
 
 from jaxrk.rkhs.vector import FiniteVec, inner
-from jaxrk.core import Module
-from jaxrk.core.typing import AnyOrInitFn
+from jaxrk.core.typing import AnyOrInitFn, Array
 
 from .base import LinOp, RkhsObject, Vec, InpVecT, OutVecT, RhInpVectT, CombT
 
 
-class FiniteOp(LinOp[InpVecT, OutVecT], Module):
+class FiniteOp(LinOp[InpVecT, OutVecT]):
     """Finite rank LinOp in RKHS"""
-    inp_feat:InpVecT
-    outp_feat:OutVecT
-    matr_init:AnyOrInitFn
-    normalize:bool = False
+    
+    
 
-    def setup(self, ):
-        self.matr = self.const_or_param("matr", self.matr_init)
+    def __init__(self, inp_feat:InpVecT, outp_feat:OutVecT, matr:Array = None, normalize:bool = False):
+        super().__init__()
+        if matr is not None:
+            assert matr.shape == (len(outp_feat), len(inp_feat))
+        self.matr = matr        
+        self.inp_feat, self.outp_feat = inp_feat, outp_feat
+        self._normalize = normalize
 
     def __len__(self):
         return len(self.inp_feat) * len(self.outp_feat)
 
     def __matmul__(self, right_inp:CombT) -> Union[OutVecT, "FiniteOp[RhInpVectT, OutVecT]"]:
         if isinstance(right_inp, FiniteOp):
-            matr = self.matr @ self.inp_feat.inner(right_inp.outp_feat) @ right_inp.matr
-            rval = FiniteOp(right_inp.inp_feat, self.outp_feat, matr)
-            return rval
+            # right_inp is an operator
+            # Op1 @ Op2
+            matr = self.inp_feat.inner(right_inp.outp_feat) @ right_inp.matr
+            if self.matr is not None:
+                matr = self.matr @ matr
+            return FiniteOp(right_inp.inp_feat, self.outp_feat, matr)
         else:
             if isinstance(right_inp, DeviceArray):
-                right_inp = FiniteVec(self.inp_feat.k, np.atleast_2d(right_inp))  
-            lin_LinOp = (self.matr @ inner(self.inp_feat, right_inp)).T
+                right_inp = FiniteVec(self.inp_feat.k, np.atleast_2d(right_inp))
+            # right_inp is a vector
+            # Op @ vec 
+            lin_LinOp = inner(self.inp_feat, right_inp)
+            
+            if self.matr is not None:
+                lin_LinOp = self.matr @ lin_LinOp
             if self._normalize:
                 lin_LinOp = lin_LinOp / lin_LinOp.sum(1, keepdims = True)
-            r = [LinearReduce(lin_LinOp)]
-            if len(right_inp) == 1:
-                r.append(Sum())
-            rval = self.outp_feat.extend_reduce(r)
-            return rval
+            lr = LinearReduce(lin_LinOp.T)
+            if len(right_inp) != 1:
+                return self.outp_feat.extend_reduce([lr])
+            else:
+                return self.outp_feat.extend_reduce([lr, Sum()])
     
     def inner(self, Y:"FiniteOp[InpVecT, OutVecT]"=None, full=True):
         assert NotImplementedError("This implementation as to be tested")
@@ -67,7 +77,7 @@ class FiniteOp(LinOp[InpVecT, OutVecT], Module):
     
     @property
     def T(self) -> "FiniteOp[OutVecT, InpVecT]":
-        return FiniteOp(self.outp_feat, self.inp_feat, self.matr.T, self.normalize)
+        return FiniteOp(self.outp_feat, self.inp_feat, self.matr.T, self._normalize)
 
     def __call__(self, inp:DeviceArray) -> RkhsObject:
         return self @ FiniteVec(self.inp_feat.k, np.atleast_2d(inp))
@@ -82,10 +92,10 @@ class FiniteOp(LinOp[InpVecT, OutVecT], Module):
 
 def CrossCovOp(inp_feat:InpVecT, outp_feat:OutVecT) -> FiniteOp[InpVecT, OutVecT]:
     assert len(inp_feat) == len(outp_feat)
-    return FiniteOp(inp_feat, outp_feat, np.eye(len(inp_feat)))
+    return FiniteOp(inp_feat, outp_feat)
 
 def CovOp(inp_feat:InpVecT) -> FiniteOp[InpVecT, InpVecT]:
-    return FiniteOp(inp_feat, inp_feat, np.eye(len(inp_feat)))
+    return FiniteOp(inp_feat, inp_feat)
     
 def CovOp_from_Samples(kern, inspace_points, prefactors = None) -> FiniteOp[InpVecT, InpVecT]:
     return CovOp(FiniteVec(kern, inspace_points, prefactors))
@@ -126,11 +136,11 @@ def Cov_inv(cov:FiniteOp[InpVecT, InpVecT], regul:float = None) -> "FiniteOp[Inp
         FiniteOp[InpVecT, InpVecT]: The inverse operator
     """
     assert regul is not None
-    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat), dtype = cov.matr.dtype))
-    matr = (cov.matr @ cov.matr @ inv_gram @ inv_gram)
-    rval = CovOp(cov.inp_feat)
-    rval.matr = matr
-    rval._inv = cov
+    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat), dtype = np.float32))
+    matr = (inv_gram @ inv_gram)
+    if cov.matr is not None:
+        matr = cov.matr @ cov.matr @ matr
+    rval = FiniteOp(cov.inp_feat, cov.inp_feat, matr)
         
     return rval
     

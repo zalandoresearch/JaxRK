@@ -19,9 +19,6 @@ from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
 from scipy.spatial.distance import pdist
 
-from jaxrk.utilities.eucldist import eucldist
-from jaxrk.core import Module
-
 
 class Kernel:
     """A generic kernel type."""
@@ -43,7 +40,7 @@ class DensityKernel(Kernel):
     """Type for positive definite kernels that are also densities."""
     @abstractmethod
     def std(self):
-        raise NotImplementedError()
+        return np.sqrt(self.var())
     @abstractmethod
     def var(self):
         raise NotImplementedError()

@@ -5,7 +5,7 @@ from numpy.core.fromnumeric import squeeze
 from jaxrk.reduce.lincomb import LinearReduce
 from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
 from time import time
-from typing import Generic, TypeVar, List
+from typing import Generic, TypeVar, List, Callable
 
 import jax
 import jax.numpy as np
@@ -19,8 +19,7 @@ from numpy.random import rand
 from jaxrk.reduce import Reduce, NoReduce
 from jaxrk.kern import Kernel
 from jaxrk.utilities.gram import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const, gram_projection
-from jaxrk.core.typing import AnyOrInitFn
-from jaxrk.core import Module
+from jaxrk.core.typing import Array
 
 
 from .base import Vec, LinOp
@@ -28,27 +27,29 @@ from .base import Vec, LinOp
 #from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
 
 
-class FiniteVec(Vec, Module):
+class FiniteVec(Vec):
     """
         RKHS feature vector using input space points. This is the simplest possible vector.
     """
-    k:Kernel
-    insp_pts_init: AnyOrInitFn
-    reduce:List[Reduce] = field(default_factory=list)
+    
 
-    def setup(self, ):        
-        if self.reduce is None:
+    def __init__(self, k:Kernel, insp_pts: Array, reduce:List[Reduce] = []):
+        super().__init__()
+        assert(len(insp_pts.shape) == 2)
+        if reduce is None:
             self.reduce = []
+        else:
+            self.reduce = reduce
+        self.k = k
 
-        self.insp_pts = self.const_or_param("insp_pts", self.insp_pts_init,)
-        assert(len(self.insp_pts.shape) == 2)
-        self.__len = self.param("__len", lambda rngkey, pts, red: Reduce.final_len(len(pts), red), self.insp_pts, self.reduce)
+        self.insp_pts = insp_pts
+        self.__len = Reduce.final_len(len(self.insp_pts), self.reduce)
         self._raw_gram_cache = None
 
     def __eq__(self, other):
         assert False, "not yet implemented checking equality of reduce"
         return (isinstance(other, self.__class__) and
-                np.all(other.inspace_points == self.insp_pts) and
+                np.all(other.insp_pts == self.insp_pts) and
                 other.k == self.k)
 
     def __len__(self):
@@ -124,7 +125,7 @@ class FiniteVec(Vec, Module):
     def get_mean_var(self, keepdims = False) -> np.ndarray:
         mean = self.reduce_gram(self.insp_pts, 0)
         variance_of_expectations = self.reduce_gram(self.insp_pts**2, 0) - mean**2
-        var = self.k.get_var() + variance_of_expectations
+        var = self.k.var() + variance_of_expectations
 
         if keepdims:
             return (mean, var)
@@ -143,12 +144,12 @@ class FiniteVec(Vec, Module):
     @classmethod
     def construct_RKHS_Elem(cls, kern, inspace_points, prefactors = None) -> "FiniteVec":
         assert len(prefactors.squeeze().shape) == 1
-        return cls(kern, inspace_points, [LinearReduce(prefactors.squeeze()[None, :])])
+        return FiniteVec(kern, inspace_points, [LinearReduce(prefactors.squeeze()[None, :])])
     
     @classmethod
     def construct_RKHS_Elem_from_estimate(cls, kern, inspace_points, estimate = "support", unsigned = True, regul = 0.1) -> "FiniteVec":
         prefactors = distr_estimate_optimization(kern, inspace_points, est=estimate)
-        return cls(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
+        return FiniteVec(kern, inspace_points, prefactors, points_per_split = len(inspace_points))
     
     @property
     def _raw_gram(self):
@@ -222,24 +223,17 @@ def distr_estimate_optimization(kernel, support_points, est="support"):
 VrightT = TypeVar("VrightT", bound=Vec)
 VleftT = TypeVar("VleftT", bound=Vec)
 
-class CombVec(Vec, Generic[VrightT, VleftT], Module):
-    vR:VrightT
-    vL:VleftT
-    operation:callable
-    reduce:List[Reduce] = field(default_factory=list)
+class CombVec(Vec, Generic[VrightT, VleftT]):
+    
 
-
-    def setup(self,):
-        assert(len(self.vR) == len(self.vL))
+    def __init__(self, vR:VrightT, vL:VleftT, operation:Callable, reduce:List[Reduce] = []):
+        super().__init__()
+        assert(len(vR) == len(vL))
         self.__len = self.variable("__len", lambda pts, red: Reduce.final_len(len(pts), red), self.vR, self.reduce)
 
     
     def reduce_gram(self, gram, axis = 0):
-        carry = gram
-        if self.reduce is not None:
-            for gr in self.reduce:
-                carry = gr(carry, axis)
-        return carry
+        return Reduce.apply(gram, self.reduce, axis) 
 
     def inner(self, Y:"CombVec[VrightT, VleftT]"=None, full=True):
         if Y is None:

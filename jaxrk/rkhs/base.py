@@ -1,11 +1,10 @@
-from abc import abstractmethod
-from jaxrk.core import Module
+from abc import abstractmethod, ABC
 from jaxrk.core.typing import Array
 import flax.linen as ln
 from typing import NewType, TypeVar, Generic, Sized, Union
 
 
-class Vec(Sized):
+class Vec(Sized, ABC):
     @abstractmethod
     def reduce_gram(self, gram, axis = 0):
         pass
@@ -23,7 +22,7 @@ RhInpVectT = TypeVar("RhInpVectT", bound=Vec)
 CombT = TypeVar("CombT", "LinOp[RhInpVectT, InpVecT]", InpVecT, Array)
 
 
-class LinOp(Vec, Generic[InpVecT, OutVecT]):
+class LinOp(Vec, Generic[InpVecT, OutVecT], ABC):
     @abstractmethod
     def __matmul__(self, right_inp:CombT) -> Union[OutVecT, "LinOp[RhInpVectT, OutVecT]"]:
         pass

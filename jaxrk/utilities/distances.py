@@ -36,12 +36,15 @@ def rkhs_cdist(a:Vec, b:Vec = None, power:float = 2.):
     Returns:
         [type]: [description]
     """
-    if a == b or b is None:
+    if b is None: # or a == b
         return rkhs_gram_cdist(a.inner(), power = power)
     else:
         return rkhs_gram_cdist(a.inner(b), a.inner(), b.inner(), power = power)
 
 def dist(a:T, b:T = None, power:float = 2.):
-    dfunc = rkhs_cdist if isinstance(a, Vec) else eucldist
+    if isinstance(a, Vec):
+        dfunc = rkhs_cdist
+    else:
+        dfunc = eucldist
     return dfunc(a, b, power = power)
 

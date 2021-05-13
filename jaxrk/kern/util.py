@@ -1,29 +1,51 @@
+from abc import ABC, abstractmethod
 import jax.numpy as np
 
-from jaxrk.core import Module
+from typing import Union
+
 from jaxrk.core.constraints import SoftPlus
 from jaxrk.core.init_fn import ConstFn
 from jaxrk.core.typing import *
 from jaxrk.utilities.distances import dist
 
-class NoScaler(Module):
+class Scaler(ABC):
+    @abstractmethod
+    def __call__(self, inp):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def inv(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def scale(self):
+        raise NotImplementedError()
+class NoScaler(Scaler):
     def __call__(self, inp):
         return inp
     
     def inv(self):
-        return 1.
+        return np.ones(1)
     
     def scale(self):
-        return 1.
+        return np.ones(1)
 
-class Scaler(Module):
-    bij: Bijection = SoftPlus()
-    init: ConstOrInitFn = ConstFn(np.ones(1))
-    scale_shape: Shape = (1, 1)
+class SimpleScaler(Scaler):
+    def __init__(self, scale:Union[Array, float]):
+        """Scale input either by global scale parameter or by per-dimension scaling parameters
 
-
-    def setup(self):
-        self.s = self.bij(self.const_or_param("s", self.init, self.scale_shape, np.float32, self.bij))
+        Args:
+            scale (Union[Array, float]): Scaling parameter(s).
+        """
+        super().__init__()
+        if isinstance(scale, float):
+            scale = np.array([[scale]])        
+        assert np.all(scale > 0.)
+        self.s = scale
+    
+    @classmethod
+    def make_unconstr(cls, scale:Union[Array, float], bij: Bijection = SoftPlus()) -> "SimpleScaler":
+        return SimpleScaler(bij(scale))
 
     def inv(self):
         return 1./self.s
@@ -32,11 +54,13 @@ class Scaler(Module):
         return self.s
 
     def __call__(self, inp):
-        assert len(inp.shape) == len(self.scale_shape)
+        if inp is None:
+            return None
+        assert len(inp.shape) == len(self.scale().shape)
         
         return self.s * inp
 
-class ScaledPairwiseDistance(Module):
+class ScaledPairwiseDistance:
     """A class for computing scaled pairwise distance for stationary/RBF kernels, depending only on
 
         dist = ‖x - x'‖^p
@@ -44,44 +68,41 @@ class ScaledPairwiseDistance(Module):
     For some power p.
     """
 
-    scale:bool = True
-    power:float = 2.
-    scale_dim:int = 1
-    scale_init:ConstOrInitFn = ConstFn(np.ones(1))
 
-    def setup(self,):
-        assert self.scale_dim >= 1
-        if not self.scale:
-            self.ds = self.gs = NoScaler()
+    def __init__(self,
+                 scaler:Scaler = NoScaler(),
+                 power:float = 2.):
+        """Compute scaled pairwise distance, given by
+            |X_i-Y_j|^p for all i, j
+
+        Args:
+            scaler (Scaler, optional): Scaling module. Defaults to NoScaler().
+            power (float, optional): Power p that the pairwise distance is taken to. Defaults to 2..
+        """
+        super().__init__()
+        self.power = power
+        if scaler.scale().size == 1:
+            self.gs = scaler
+            self.ds = NoScaler()
+            self.is_global = True
         else:
-            if self.scale_dim > 0:
-                self.gs = Scaler(init = self.scale_init)
-                self.ds = NoScaler()
-            else:
-                self.gs = NoScaler()
-                self.ds = Scaler(scale_shape = (1, self.scale_dim), init = self.scale_init)  
-
-
+            self.gs = NoScaler()
+            self.ds = scaler
+            self.is_global = False
     
     def _get_scale_param(self):
-        if self.scale_dim > 1:
-            return self.gs.inv()**(1./self.power)
+        if self.is_global:
+            return self.gs.inv()
         else:
-            return self.ds.inv()
+            return self.ds.inv()**(1./self.power)
 
     def __call__(self, X, Y=None, diag = False,):
-        assert len(X.shape) == 2
-      
-
         if diag:
             if Y is None:
-                dists = np.zeros(X.shape[0])
+                rval = np.zeros(X.shape[0])
             else:
                 assert(X.shape == Y.shape)
-                dists = self.gs(np.sum(np.abs(self.ds(X) - self.ds(Y))**self.power, 1))
+                rval = self.gs(np.sum(np.abs(self.ds(X) - self.ds(Y))**self.power, 1))
         else:
-            sY = None
-            if Y is not None:
-                sY = self.ds(Y)
-            dists = self.gs(dist(self.ds(X), sY, power = self.power))
-        return dists
+            rval = self.gs(dist(self.ds(X), self.ds(Y), power = self.power))
+        return rval

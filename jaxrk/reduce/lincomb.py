@@ -31,14 +31,13 @@ class SparseReduce(Reduce):
             idcs (List[np.array]): The indices of the rows to sum/average in the desired order. Each list element contains 2d arrays. The number of columns in the array is the number of summed/averaged elements.
             average (bool): If True average rows, else sum rows."""
 
-    idcs:List[Array]
-    average:bool = True
     
-    def setup(self):
+    def __init__(self, idcs:List[Array], average:bool = True, max_idx = None):
+        super().__init__()
         self.idcs = idcs
-        max_idx_const = self.variable('constants', "max_idx_const", lambda idcs: np.max(np.array([np.max(i) for i in idcs])), self.idcs)
-        self.max_idx = max_idx_const.value
-        if self.average:
+        if max_idx is None:
+            self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
+        if average:
             self._reduce = np.mean
         else:
             self._reduce = np.sum
@@ -91,10 +90,11 @@ class BlockReduce(Reduce):
             average (bool): wether or not to average
     """
 
-    block_boundaries:Array
-    average:bool = True
-    def setup(self, ):
-        if self.average:
+    
+    def __init__(self, block_boundaries:Array, average:bool = True):
+        super().__init__()
+        self.block_boundaries = block_boundaries
+        if average:
             self._reduce = np.mean
         else:
             self._reduce = np.sum
@@ -125,7 +125,10 @@ class BlockReduce(Reduce):
         return BlockReduce(change, mean)
 
 class LinearReduce(Reduce):
-    linear_map:Array
+    
+    def __init__(self, linear_map:Array):
+        super().__init__()
+        self.linear_map = linear_map
 
     def reduce_first_ax(self, inp:np.array):
         assert len(inp.shape) == 2

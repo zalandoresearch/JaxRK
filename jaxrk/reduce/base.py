@@ -14,7 +14,6 @@ import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
 from jaxrk.utilities.views import tile_view
-from jaxrk.core import Module
 import flax.linen as ln
 from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
 from jaxrk.core.init_fn import ConstFn
@@ -23,7 +22,7 @@ from jaxrk.core.init_fn import ConstFn
 
 
 
-class Reduce(Callable, ABC, Module):
+class Reduce(Callable, ABC):
     """The basic reduction type."""
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         rval = self.reduce_first_ax(np.swapaxes(inp, axis, 0))
@@ -39,11 +38,13 @@ class Reduce(Callable, ABC, Module):
 
     @classmethod
     def apply(cls, inp, reduce:List["Reduce"] = None, axis = 0):
-        carry = np.swapaxes(inp, axis, 0)
-        if reduce is not None:
+        if reduce is None or len(reduce) == 0:
+            return inp
+        else:
+            carry = np.swapaxes(inp, axis, 0)
             for gr in reduce:
                 carry = gr.reduce_first_ax(carry)
-        return np.swapaxes(carry, axis, 0)
+            return np.swapaxes(carry, axis, 0)
     
     @classmethod
     def final_len(cls, original_len:int, reduce:List["Reduce"] = None):
@@ -81,17 +82,12 @@ class NoReduce(Reduce):
         return original_len
 
 class Prefactors(Reduce):
-    factors_init: ConstOrInitFn = ConstFn(np.ones(1))
-    dim:int = None
+    
 
-    def setup(self):
-        if not isinstance(self.factors_init, Callable):
-            if self.dim is None:
-                dim = self.factors_init.shape[0]
-            else:                
-                dim = self.dim
-        self.prefactors = self.const_or_param("prefactors", self.factors_init, (self.dim,), np.float32, )
-        assert dim == self.prefactors.shape[0]
+    def __init__(self, prefactors:Array):
+        super().__init__()
+        assert len(prefactors.shape) == 1
+        self.prefactors = prefactors
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         assert self.prefactors.shape[0] == inp.shape[axis]
@@ -105,10 +101,10 @@ class Prefactors(Reduce):
         return original_len
 
 class Repeat(Reduce):
-    times:int
-
-    def setup(self, ):
-        assert self.times > 0
+    def __init__(self, times:int):
+        super().__init__()        
+        assert times > 0
+        self.times = times
     
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         return np.repeat(inp, axis)
@@ -120,10 +116,10 @@ class Repeat(Reduce):
         return original_len * self.times
 
 class TileView(Reduce):
-    new_len:int
-
-    def setup(self, ):
-        assert self.new_len > 0
+    def __init__(self, times:int):
+        super().__init__()        
+        assert new_len > 0
+        self.new_len = new_len
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
         assert self.new_len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
@@ -144,10 +140,10 @@ class Sum(Reduce):
         return 1
 
 class Mean(Reduce):
-    def __call__(self, inp:np.array, axis:int = 0) -> np.array:
-        return inp.mean(axis = axis, keepdims = True)
+    def __call__(self, inp:Array, axis:int = 0) -> np.array:
+        return np.mean(inp, axis = axis, keepdims = True)
 
-    def reduce_first_ax(self, inp:np.array) -> np.array:
+    def reduce_first_ax(self, inp:Array) -> np.array:
         return self.__call__(inp, 0)
     
     def new_len(self, original_len:int) -> int:
@@ -155,10 +151,12 @@ class Mean(Reduce):
 
 class BalancedSum(Reduce):
     """Sum up even number of elements in input."""
-    points_per_split:int
     
-    def setup(self, ):
-        assert self.points_per_split > 0
+    
+    def __init__(self, points_per_split:int):
+        super().__init__()
+        assert points_per_split > 0
+        self.points_per_split = points_per_split
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         perm = list(range(len(inp.shape)))
