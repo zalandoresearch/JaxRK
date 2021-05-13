@@ -89,104 +89,44 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
     def __call__(self, X, Y=None, diag = False,):
         return exp(-self.dist(X, Y, diag))
 
-
-# class GenPeriodicKernel(Kernel):
-
-#     def __init__(self, dist:ScaledPairwiseDistance, length_scale:float, sin_power:float = 2.):
-#         """Periodic kernel class. A periodic kernel is defined by
-#             exp(-2 * sin(dist(X, Y, diag))**sin_power / length_scale)
-
-#         Args:
-#             dist (ScaledPairwiseDistance): Class computing the scaled pairwise distance between data points.
-#             length_scale (float): Length scale.
-#             sin_power (float): Power to which the sine is raised.
-#         """
-#         super().__init__()
-#         self.dist = dist
-
-#         assert np.all(length_scale > 0)
-#         assert sin_power > 0
-#         self.ls = length_scale
-#         self.pow = sin_power
-
-#     @classmethod
-#     def make_unconstr(cls,
-#                       period:Array,
-#                       shape:float,
-#                       length_scale:float,
-#                       sin_power:float = 2.,
-#                       scale_bij: Bijection = SoftPlus(),
-#                       shape_bij: Bijection = Sigmoid(0., 2.),
-#                       length_scale_bij: Bijection = SoftPlus(),
-#                       sin_power_bij: Bijection = Sigmoid(0., 2.)) -> "PeriodicKernel":
-#         """Factory for constructing a PeriodicKernel from unconstrained parameters.
-#            The constraints for each parameters are then guaranteed by applying their accompanying bijections.
-#             Args:
-#                 period (Array): Scale parameter, unconstrained. 
-#                 shape (float): Shape parameter, unconstrained. Lower values result in pointier kernel functions. 
-#                 length_scale (float): Lengscale parameter, unconstrained.
-#                 sin_power (float): Parameter for power to which the sine value is raised, unconstrained.
-#                 scale_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to SoftPlus.
-#                 shape_bij (Bijection): Bijection mapping from unconstrained real numbers to half-open interval (0,2]. Defaults to Sigmoid(0., 2.).
-#                 length_scale_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to SoftPlus.
-#                 sin_power_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to Sigmoid(0., 2.).
-
-#         Returns:
-#             PeriodicKernel: The constructed kernel.
-#         """
-#         return cls.make(scale_bij(period), shape_bij(shape), length_scale_bij(length_scale), sin_power_bij(sin_power))
-    
-#     @classmethod
-#     def make(cls,
-#              period:Array,
-#              shape:float,
-#              length_scale:float,
-#              sin_power:float = 2.) -> "PeriodicKernel":
-#         """Factory for constructing a PeriodicKernel.
-#             Args:
-#                 period (Array): Scale parameter, nonnegative.
-#                 shape (float): Shape parameter, in half-open interval (0,2]. Lower values result in pointier kernel functions. Shape == 2 results in usual Gaussian kernel, shape == 1 results in Laplace kernel.
-#                 length_scale (float): Lengscale parameter, nonnegative.
-#                 sin_power (float): Parameter for power to which the sine value is raised, nonnegative.
-#             Returns:
-#                 PeriodicKernel: The constructed kernel.
-#         """
-#         assert shape > 0 and shape <= 2
-#         dist = ScaledPairwiseDistance(scaler = SimpleScaler(period), power = shape)
-#         return cls(dist, length_scale, sin_power)
-
-#     def __call__(self, X, Y=None, diag = False,):
-#         return exp(-2 * (np.sin(np.pi * self.dist(X, Y, diag)) /self.ls)**self.pow)
-
 class PeriodicKernel(Kernel):
 
-    def __init__(self, period:float, length_scale:float,):
+    def __init__(self, period:Union[float, Array], length_scale:float):
         """Periodic kernel class. A periodic kernel is defined by
-            exp(-2 * sin(dist(X, Y, diag))**sin_power / length_scale)
+            exp(-2 * (sin(dist(X, Y, diag)) / length_scale)**power)
 
         Args:
-            period (float): period.
+            period (Union[float, Array]): Period, this is used as a scaling parameter inside the distance computation.
             length_scale (float): Length scale.
         """
         super().__init__()
+        assert period > 0 and length_scale > 0
         self.dist = ScaledPairwiseDistance(scaler = SimpleScaler(period), power = 1.)
-        print(self.dist.gs, self.dist.gs.scale().size, self.dist.ds, self.dist.ds.scale().size)
-        self.ls = length_scale        
+        self.ls = length_scale
+    
+    @classmethod
+    def make_unconstr(cls,
+                      period:float,
+                      length_scale:float,
+                      period_bij: Bijection = SoftPlus(),
+                      length_scale_bij: Bijection = SoftPlus()) -> "PeriodicKernel":
+        """Factory for constructing a PeriodicKernel from unconstrained parameters.
+           The constraints for each parameters are then guaranteed by applying their accompanying bijections.
+            Args:
+                period (float): Scale parameter, unconstrained.
+                length_scale (float): Lengscale parameter, unconstrained.
+                period_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to SoftPlus.
+                length_scale_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to SoftPlus.
+
+        Returns:
+            PeriodicKernel: The constructed kernel.
+        """
+        return cls(period_bij(period), length_scale_bij(length_scale))
     
 
     def __call__(self, X, Y=None, diag = False,):
-        assert len(np.shape(X))==2
-        assert not diag
-        scale_param = self.dist._get_scale_param()
-        #scale_param = 1./self.dist.gs.scale()
-        X = X * scale_param
-        if Y is not None:
-            Y = Y * scale_param
-
-        dists = eucldist(X, Y, power = 1.)
-        d2 = self.dist(X, Y, diag)
-        assert np.allclose(dists, d2)
-        return exp(- 2* np.sin(np.pi*dists)**2 / self.ls**2)
+        d = self.dist(X, Y, diag)
+        return exp(- 2* (np.sin(np.pi*d) / self.ls)**2.)
 
 class ThreshSpikeKernel(Kernel):
     def __init__(self,  dist:ScaledPairwiseDistance, spike:float, non_spike:float, threshold:float):
