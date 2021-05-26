@@ -1,6 +1,6 @@
 from pathlib2 import Path
 from typing import Callable
-from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array
+from ..core.typing import PRNGKeyT, Shape, Dtype, Array
 from functools import partial
 
 import numpy as onp
@@ -10,14 +10,14 @@ from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
 
-from jaxrk.kern.base import DensityKernel, Kernel
-from jaxrk.kern.util import ScaledPairwiseDistance
-from jaxrk.core.init_fn import ConstFn, ConstIsotropicFn
+from ..kern.base import DensityKernel, Kernel
+from ..kern.util import ScaledPairwiseDistance
+from ..core.init_fn import ConstFn, ConstIsotropicFn
 import flax.linen as ln
-from jaxrk.core.typing import ConstOrInitFn
-from jaxrk.core.init_fn import ConstFn, ConstIsotropicFn
-from jaxrk.core.constraints import SoftPlus, Bijection, CholeskyBijection
-from jaxrk.utilities.views import tile_view
+from ..core.typing import ConstOrInitFn
+from ..core.init_fn import ConstFn, ConstIsotropicFn
+from ..core.constraints import SoftPlus, Bijection, CholeskyBijection
+from ..utilities.views import tile_view
 
 class FeatMapKernel(Kernel):
     def __init__(self, feat_map:Callable[[Array], Array] = None):

@@ -1,15 +1,15 @@
 from copy import copy
-from jaxrk.reduce.centop_reductions import CenterInpFeat, DecenterOutFeat
-from jaxrk.reduce.lincomb import LinearReduce
-from jaxrk.reduce.base import Prefactors, Sum
+from ..reduce.centop_reductions import CenterInpFeat, DecenterOutFeat
+from ..reduce.lincomb import LinearReduce
+from ..reduce.base import Prefactors, Sum
 from typing import Generic, TypeVar, Callable, Union
 
 import jax.numpy as np
 from jax.interpreters.xla import DeviceArray
 from scipy.optimize import minimize
 
-from jaxrk.rkhs.vector import FiniteVec, inner
-from jaxrk.core.typing import AnyOrInitFn, Array
+from ..rkhs.vector import FiniteVec, inner
+from ..core.typing import AnyOrInitFn, Array
 
 from .base import LinOp, RkhsObject, Vec, InpVecT, OutVecT, RhInpVectT, CombT
 

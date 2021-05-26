@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import jax.numpy as np, jax.scipy as sp
 from jax.scipy.special import expit, logit
 from typing import Callable, Union
-from jaxrk.core.typing import Bijection
+from ..core.typing import Bijection
 import jax.lax as lax
 
 

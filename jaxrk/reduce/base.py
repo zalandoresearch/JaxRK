@@ -13,10 +13,10 @@ import jax.scipy as sp
 import jax.scipy.stats as stats
 from jax.numpy import exp, log, sqrt
 from jax.scipy.special import logsumexp
-from jaxrk.utilities.views import tile_view
+from ..utilities.views import tile_view
 import flax.linen as ln
-from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
-from jaxrk.core.init_fn import ConstFn
+from ..core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
+from ..core.init_fn import ConstFn
 
 
 

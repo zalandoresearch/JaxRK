@@ -1,6 +1,6 @@
 import jax.numpy as np
 from jax import grad
-from jaxrk.rkhs import FiniteVec
+from ..rkhs import FiniteVec
 from jax.random import randint, PRNGKey
 from scipy.optimize import minimize
 from time import time

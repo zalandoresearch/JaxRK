@@ -17,7 +17,7 @@ from jax.scipy.special import logsumexp
 from jax.lax import scan, map
 from jax import vmap
 from jax.ops import index_update
-from jaxrk.core.typing import  Array
+from ..core.typing import  Array
 
 
 from .base import Reduce

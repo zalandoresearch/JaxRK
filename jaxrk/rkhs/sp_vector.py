@@ -1,13 +1,13 @@
 import copy
-from jaxrk.reduce.base import Center
+from ..reduce.base import Center
 from typing import List, Union, Iterable, Iterator
 
 import jax.numpy as np
 from jax import jit, lax, vmap
 from jax.ops import index, index_add, index_update
-from jaxrk.reduce import Reduce, NoReduce
-from jaxrk.rkhs.operator import Cmo
-from jaxrk.rkhs.vector import CombVec, FiniteVec
+from ..reduce import Reduce, NoReduce
+from ..rkhs.operator import Cmo
+from ..rkhs.vector import CombVec, FiniteVec
 
 from .base import Map, RkhsObject, Vec
 

@@ -3,10 +3,10 @@ import jax.numpy as np
 
 from typing import Union
 
-from jaxrk.core.constraints import SoftPlus
-from jaxrk.core.init_fn import ConstFn
-from jaxrk.core.typing import *
-from jaxrk.utilities.distances import dist
+from ..core.constraints import SoftPlus
+from ..core.init_fn import ConstFn
+from ..core.typing import *
+from ..utilities.distances import dist
 
 class Scaler(ABC):
     @abstractmethod

@@ -2,8 +2,8 @@ from copy import copy
 from dataclasses import field
 
 from numpy.core.fromnumeric import squeeze
-from jaxrk.reduce.lincomb import LinearReduce
-from jaxrk.reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
+from ..reduce.lincomb import LinearReduce
+from ..reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
 from time import time
 from typing import Generic, TypeVar, List, Callable
 
@@ -16,15 +16,15 @@ from jax.numpy import dot, exp, log
 from jax.scipy.special import logsumexp
 from numpy.random import rand
 
-from jaxrk.reduce import Reduce, NoReduce
-from jaxrk.kern import Kernel
-from jaxrk.utilities.gram import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const, gram_projection
-from jaxrk.core.typing import Array
+from ..reduce import Reduce, NoReduce
+from ..kern import Kernel
+from ..utilities.gram import rkhs_gram_cdist, rkhs_gram_cdist_ignore_const, gram_projection
+from ..core.typing import Array
 
 
 from .base import Vec, LinOp
 
-#from jaxrk.utilities.frank_wolfe import frank_wolfe_pos_proj
+#from ..utilities.frank_wolfe import frank_wolfe_pos_proj
 
 
 class FiniteVec(Vec):

@@ -1,9 +1,9 @@
 
 from typing import Callable, Tuple, Union, Optional
-from jaxrk.core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
+from ..core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
 from functools import partial
-from jaxrk.core.constraints import SoftPlus, Bijection, SoftBd, Sigmoid
-from jaxrk.core.init_fn import ConstFn
+from ..core.constraints import SoftPlus, Bijection, SoftBd, Sigmoid
+from ..core.init_fn import ConstFn
 from dataclasses import dataclass
 from flax.linen.module import compact
 import flax.linen as ln
@@ -19,9 +19,9 @@ from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal, norm
 
-from jaxrk.utilities.eucldist import eucldist
-from jaxrk.kern.base import DensityKernel, Kernel
-from jaxrk.kern.util import ScaledPairwiseDistance, SimpleScaler
+from ..utilities.eucldist import eucldist
+from ..kern.base import DensityKernel, Kernel
+from ..kern.util import ScaledPairwiseDistance, SimpleScaler
 
 
 class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scipy

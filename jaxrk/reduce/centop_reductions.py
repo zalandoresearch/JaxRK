@@ -10,7 +10,7 @@ from typing import Callable
 from abc import ABC, abstractmethod
 
 import jax.numpy as np
-from jaxrk.core.typing import Array
+from ..core.typing import Array
 from .base import Reduce
 
 class CenterInpFeat(Reduce):

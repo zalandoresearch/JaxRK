@@ -1,5 +1,5 @@
 import jax.numpy as np
-from jaxrk.core.typing import Array, InitFn, Bijection
+from ..core.typing import Array, InitFn, Bijection
 from dataclasses import dataclass
 
 @dataclass
