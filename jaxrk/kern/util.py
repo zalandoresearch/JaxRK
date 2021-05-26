@@ -39,7 +39,13 @@ class SimpleScaler(Scaler):
         """
         super().__init__()
         if isinstance(scale, float):
-            scale = np.array([[scale]])        
+            scale = np.array([[scale]])
+        else:
+            scale = np.atleast_1d(scale)
+            if len(scale.shape) == 1:
+                scale = scale[np.newaxis, :]
+            else:
+                assert (len(scale.shape) == 2 and scale.shape[0] == 1)
         assert np.all(scale > 0.)
         self.s = scale
     
@@ -56,8 +62,10 @@ class SimpleScaler(Scaler):
     def __call__(self, inp):
         if inp is None:
             return None
-        assert len(inp.shape) == len(self.scale().shape)
-        
+        # either global scaling, meaning self.scale().size == 1,
+        # or local scaling, in which case inp.shape[1] == 
+        assert self.scale().size == 1 or self.scale().size == inp.shape[1]
+
         return self.s * inp
 
 class ScaledPairwiseDistance:
@@ -104,5 +112,5 @@ class ScaledPairwiseDistance:
                 assert(X.shape == Y.shape)
                 rval = self.gs(np.sum(np.abs(self.ds(X) - self.ds(Y))**self.power, 1))
         else:
-            rval = self.gs(dist(self.ds(X), self.ds(Y), power = self.power))
+            rval = self.gs(dist(self.ds(X), self.ds(Y), power = 1.)) ** self.power
         return rval

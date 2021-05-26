@@ -31,6 +31,8 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
     def __init__(self, dist:ScaledPairwiseDistance):
         super().__init__()
         self.dist = dist
+        self.nconst = self.dist.power / (2 * self.dist._get_scale_param() * np.exp(sp.special.gammaln(1. / self.dist.power)))
+
 
     @classmethod
     def make_unconstr(cls,
@@ -50,7 +52,7 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
     
     @classmethod
     def make(cls,
-             scale:Array,
+             length_scale:Array,
              shape:float) -> "GenGaussKernel":
         """Factory for constructing a GenGaussKernel from scale and shape parameters.
             Args:
@@ -58,36 +60,40 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
                 shape (float): Shape parameter, in half-open interval (0,2]. Lower values result in pointier kernel functions. Shape == 2 results in usual Gaussian kernel, shape == 1 results in Laplace kernel.
         """
         assert shape > 0 and shape <= 2
-        dist = ScaledPairwiseDistance(scaler = SimpleScaler(scale), power = shape)
+        dist = ScaledPairwiseDistance(scaler = SimpleScaler(1./length_scale), power = shape)
         return GenGaussKernel(dist)
     
     @classmethod
     def make_laplace(cls,
-             scale:Array) -> "GenGaussKernel":
+             length_scale:Array) -> "GenGaussKernel":
         """Factory for constructing a Laplace kernel from scale parameter.
             Args:
                 scale (Array): Scale parameter, nonnegative.
         """
-        return GenGaussKernel.make(scale, 1.)
+        return GenGaussKernel.make(length_scale, 1.)
     
     @classmethod
     def make_gauss(cls,
-             scale:Array) -> "GenGaussKernel":
+             length_scale:Array) -> "GenGaussKernel":
         """Factory for constructing a Laplace kernel from scale parameter.
             Args:
                 scale (Array): Scale parameter, nonnegative.
         """
-        return GenGaussKernel.make(scale, 2.)
+        #f = sp.special.gammaln(np.array([3, 1]) / 2)
+        #f = np.exp((f[0] - f[1]) / 2)
+        f = 0.70710695
+        
+        return GenGaussKernel.make(length_scale/f, 2.)
 
     def std(self):
         return np.sqrt(self.var())
     
     def var(self):
-        f = np.exp(sp.special.gammaln(np.array([3, 1]) / self.dist.power))
-        return self.dist._get_scale_param()**2 * f[0] / f[1]
+        f = sp.special.gammaln(np.array([3, 1]) / self.dist.power)
+        return self.dist._get_scale_param()**2 * np.exp(f[0] - f[1])
 
     def __call__(self, X, Y=None, diag = False,):
-        return exp(-self.dist(X, Y, diag))
+        return self.nconst * exp(-self.dist(X, Y, diag))
 
 class PeriodicKernel(Kernel):
 
@@ -101,7 +107,7 @@ class PeriodicKernel(Kernel):
         """
         super().__init__()
         assert period > 0 and length_scale > 0
-        self.dist = ScaledPairwiseDistance(scaler = SimpleScaler(period), power = 1.)
+        self.dist = ScaledPairwiseDistance(scaler = SimpleScaler(1./period), power = 1.)
         self.ls = length_scale
     
     @classmethod
@@ -146,7 +152,7 @@ class ThreshSpikeKernel(Kernel):
     
     @classmethod
     def make_unconstr(cls,
-             scale:Array,
+             length_scale:Array,
              shape:float,
              spike:float,
              non_spike:float,
@@ -171,7 +177,7 @@ class ThreshSpikeKernel(Kernel):
             Returns:
                 ThreshSpikeKernel: Distance threshold
         """
-        dist = ScaledPairwiseDistance(scaler = SimpleScaler(scale_bij(scale)), power = shape_bij(shape))
+        dist = ScaledPairwiseDistance(scaler = SimpleScaler(1./scale_bij(length_scale)), power = shape_bij(shape))
         return cls(dist, spike_bij(spike), non_spike_bij(non_spike), threshold_bij(threshold))
         
 
