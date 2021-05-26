@@ -138,7 +138,11 @@ def Cov_inv(cov:FiniteOp[InpVecT, InpVecT], regul:float = None) -> "FiniteOp[Inp
     inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat)))
     matr = (inv_gram @ inv_gram)
     if cov.matr is not None:
-        matr = cov.matr @ cov.matr @ matr
+        #according to eq. 9 in appendix A.2 of "Kernel conditional density operators", the following line would rather be
+        # matr = cov.matr @ cov.matr @ matr
+        #this might be a mistake in the paper.
+        matr = np.linalg.inv(cov.matr) @ matr
+        
     rval = FiniteOp(cov.inp_feat, cov.inp_feat, matr)
         
     return rval
@@ -165,20 +169,16 @@ def Cov_solve(cov:FiniteOp[InpVecT, InpVecT], lhs:CombT, regul:float = None) -> 
         regul = Cov_regul(1, len(cov.inp_feat))
     return (Cov_inv(cov, regul) @ lhs)
 
-def Cmo(inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, stoch_err_param:float = 0.1) -> FiniteOp[InpVecT, OutVecT]:
-        if regul is None:
-            regul = Cov_regul(1, len(inp_feat), c = stoch_err_param)
-        else:            
+def Cmo(inp_feat:InpVecT, outp_feat:OutVecT, regul:float = None) -> FiniteOp[InpVecT, OutVecT]:
+        if regul is not None:
             regul = np.array(regul, dtype=np.float32)
             assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)
-        matr = np.linalg.inv(inner(inp_feat) + regul * np.eye(len(inp_feat)))
-        return  FiniteOp(inp_feat, outp_feat, matr)
+        return  CrossCovOp(Cov_solve(CovOp(inp_feat), inp_feat, regul=regul), outp_feat)
 
-def Cdo(inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01,) -> FiniteOp[InpVecT, OutVecT]:
+def Cdo(inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = None) -> FiniteOp[InpVecT, OutVecT]:
+        if regul is not None:
+            regul = np.array(regul, dtype=np.float32)
+            assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)
         mo = Cmo(inp_feat, outp_feat, regul)
-        matr = Cov_solve(CovOp(ref_feat), mo, regul).matr
-        rval =  FiniteOp(mo.inp_feat,
-                         ref_feat,
-                         matr,
-                         normalize=True)
+        rval =  Cov_solve(CovOp(ref_feat), mo, regul=regul)
         return rval
