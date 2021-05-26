@@ -84,18 +84,17 @@ class FiniteOp(LinOp[InpVecT, OutVecT]):
     
     def apply(self, inp:CombT) -> RkhsObject:
         return self @ inp
-    
-    def solve(self, result:OutVecT) -> RkhsObject:
-        raise NotImplementedError()
 
 
 
 def CrossCovOp(inp_feat:InpVecT, outp_feat:OutVecT) -> FiniteOp[InpVecT, OutVecT]:
     assert len(inp_feat) == len(outp_feat)
-    return FiniteOp(inp_feat, outp_feat)
+    N = len(inp_feat)
+    return FiniteOp(inp_feat, outp_feat, np.eye(N)/N)
 
 def CovOp(inp_feat:InpVecT) -> FiniteOp[InpVecT, InpVecT]:
-    return FiniteOp(inp_feat, inp_feat)
+    N = len(inp_feat)
+    return FiniteOp(inp_feat, inp_feat, np.eye(N)/N)
     
 def CovOp_from_Samples(kern, inspace_points, prefactors = None) -> FiniteOp[InpVecT, InpVecT]:
     return CovOp(FiniteVec(kern, inspace_points, prefactors))
@@ -136,7 +135,7 @@ def Cov_inv(cov:FiniteOp[InpVecT, InpVecT], regul:float = None) -> "FiniteOp[Inp
         FiniteOp[InpVecT, InpVecT]: The inverse operator
     """
     assert regul is not None
-    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat), dtype = np.float32))
+    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat)))
     matr = (inv_gram @ inv_gram)
     if cov.matr is not None:
         matr = cov.matr @ cov.matr @ matr
@@ -163,23 +162,23 @@ def Cov_solve(cov:FiniteOp[InpVecT, InpVecT], lhs:CombT, regul:float = None) -> 
             lhs = FiniteVec(cov.inp_feat.k, np.atleast_2d(lhs))
         reg_inp = lhs
     if regul is None:
-        regul = Cov_regul(max(reg_inp.nsamps().min(), 1), max(cov.inp_feat.nsamps(True), 1))
+        regul = Cov_regul(1, len(cov.inp_feat))
     return (Cov_inv(cov, regul) @ lhs)
 
-def Cmo(inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01) -> FiniteOp[InpVecT, OutVecT]:
-        regul = np.array(regul, dtype=np.float32)
-
-        #we do not center the output features - this still leads to the correct results in the output of the CME
-        c_inp_feat = inp_feat
-        G = inner(c_inp_feat)
-        assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)       
-        matr = np.linalg.inv(G + regul * np.eye(len(inp_feat)))
+def Cmo(inp_feat:InpVecT, outp_feat:OutVecT, regul:float = 0.01, stoch_err_param:float = 0.1) -> FiniteOp[InpVecT, OutVecT]:
+        if regul is None:
+            regul = Cov_regul(1, len(inp_feat), c = stoch_err_param)
+        else:            
+            regul = np.array(regul, dtype=np.float32)
+            assert regul.squeeze().size == 1 or regul.squeeze().shape[0] == len(inp_feat)
+        matr = np.linalg.inv(inner(inp_feat) + regul * np.eye(len(inp_feat)))
         return  FiniteOp(inp_feat, outp_feat, matr)
 
 def Cdo(inp_feat:InpVecT, outp_feat:OutVecT, ref_feat:OutVecT, regul = 0.01,) -> FiniteOp[InpVecT, OutVecT]:
         mo = Cmo(inp_feat, outp_feat, regul)
         matr = Cov_solve(CovOp(ref_feat), mo, regul).matr
-        return FiniteOp(mo.inp_feat,
+        rval =  FiniteOp(mo.inp_feat,
                          ref_feat,
                          matr,
                          normalize=True)
+        return rval
