@@ -3,7 +3,7 @@ from dataclasses import field
 
 from numpy.core.fromnumeric import squeeze
 from ..reduce.lincomb import LinearReduce
-from ..reduce.base import BalancedSum, Center, Prefactors, Sum, Mean
+from ..reduce.base import Prefactors, Sum, Mean
 from time import time
 from typing import Generic, TypeVar, List, Callable
 

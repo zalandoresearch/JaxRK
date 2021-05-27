@@ -149,14 +149,18 @@ class Mean(Reduce):
     def new_len(self, original_len:int) -> int:
         return 1
 
-class BalancedSum(Reduce):
+class BalancedRed(Reduce):
     """Sum up even number of elements in input."""
     
     
-    def __init__(self, points_per_split:int):
+    def __init__(self, points_per_split:int, average=False):
         super().__init__()
         assert points_per_split > 0
         self.points_per_split = points_per_split
+        if average:
+            self.red = np.mean
+        else:
+            self.red = np.sum
 
     def __call__(self, inp:np.array, axis:int = 0) -> np.array:
         perm = list(range(len(inp.shape)))
@@ -165,7 +169,7 @@ class BalancedSum(Reduce):
 
 
         inp = np.transpose(inp, perm)
-        inp = np.sum(np.reshape(inp, (-1, self.points_per_split, inp.shape[-1])), axis = 1) 
+        inp = self.red(np.reshape(inp, (-1, self.points_per_split, inp.shape[-1])), axis = 1) 
         inp =  np.transpose(inp, perm)
         return inp
 

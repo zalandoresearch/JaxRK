@@ -135,7 +135,8 @@ def Cov_inv(cov:FiniteOp[InpVecT, InpVecT], regul:float = None) -> "FiniteOp[Inp
         FiniteOp[InpVecT, InpVecT]: The inverse operator
     """
     assert regul is not None
-    inv_gram = np.linalg.inv(inner(cov.inp_feat) + regul * np.eye(len(cov.inp_feat)))
+    gram = inner(cov.inp_feat)
+    inv_gram = np.linalg.inv(gram + regul * np.eye(len(cov.inp_feat)))
     matr = (inv_gram @ inv_gram)
     if cov.matr is not None:
         #according to eq. 9 in appendix A.2 of "Kernel conditional density operators", the following line would rather be
