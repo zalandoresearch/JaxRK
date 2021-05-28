@@ -57,9 +57,10 @@ class DictKernel(Kernel):
             cholesky_lower: A square lower cholesky factor.
     """
 
-    def __init__(self, gram_values:Array = None, cholesky_lower:Array = None):
+    def __init__(self, inspace_vals:Array, gram_values:Array = None, cholesky_lower:Array = None):
         super().__init__()
         assert gram_values != cholesky_lower, "Exactly one of gram_values and cholesky_lower has to be defined."
+        self.inspace_vals = inspace_vals
         if gram_values is None:
             assert cholesky_lower is not None, "Exactly one of gram_values and cholesky_lower has to be defined."
             assert len(cholesky_lower.shape) == 2
@@ -69,7 +70,7 @@ class DictKernel(Kernel):
         else:
             assert cholesky_lower is None, "Exactly one of gram_values and cholesky_lower has to be defined."
             assert len(gram_values.shape) == 2
-            assert gram_values.size[0] == gram_values.size[1]
+            assert gram_values.shape[0] == gram_values.shape[1]
             self.gram_values = gram_values
 
     @classmethod
@@ -121,7 +122,7 @@ class DictKernel(Kernel):
         reorder = np.argmax(header[:,None] == d[None,:], 0)
        # print(header, m, "\n", d, m[reorder,:][:,reorder])
 
-        return cls(d, m[reorder,:][:,reorder])
+        return cls(d, gram_values = m[reorder,:][:,reorder])
 
     def __call__(self, idx_X, idx_Y=None, diag = False):
         assert len(np.shape(idx_X))==2 and (idx_Y is None or len(np.shape(idx_Y))==2)

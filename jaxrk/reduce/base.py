@@ -116,17 +116,17 @@ class Repeat(Reduce):
         return original_len * self.times
 
 class TileView(Reduce):
-    def __init__(self, times:int):
+    def __init__(self, result_len:int):
         super().__init__()        
-        assert new_len > 0
-        self.new_len = new_len
+        assert result_len > 0
+        self.result_len = result_len
 
     def reduce_first_ax(self, inp:np.array) -> np.array:
-        assert self.new_len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
-        return tile_view(inp, self.new_len//inp.shape[0])
+        assert self.result_len % inp.shape[0] == 0, "Input can't be broadcasted to target length %d" % self._len
+        return tile_view(inp, self.result_len//inp.shape[0])
     
     def new_len(self, original_len:int) -> int:
-        return self.new_len
+        return self.result_len
 
 
 class Sum(Reduce):

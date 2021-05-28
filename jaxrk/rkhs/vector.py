@@ -229,7 +229,9 @@ class CombVec(Vec, Generic[VrightT, VleftT]):
     def __init__(self, vR:VrightT, vL:VleftT, operation:Callable, reduce:List[Reduce] = []):
         super().__init__()
         assert(len(vR) == len(vL))
-        self.__len = self.variable("__len", lambda pts, red: Reduce.final_len(len(pts), red), self.vR, self.reduce)
+        self.vR, self.vL = vR, vL
+        self.reduce = reduce
+        self.__len = Reduce.final_len(len(self.vR), reduce)
 
     
     def reduce_gram(self, gram, axis = 0):
