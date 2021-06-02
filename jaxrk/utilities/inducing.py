@@ -1,7 +1,7 @@
 import jax.numpy as np
 from numpy.random import randn, rand
 from jax import grad
-from jaxrk.kern import Kernel
+from ..kern import Kernel
 from scipy.optimize import minimize
 import numpy as onp
 

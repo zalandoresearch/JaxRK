@@ -5,6 +5,8 @@ from jax import jit
 #based on https://stackoverflow.com/questions/52030458/vectorized-spatial-distance-in-python-using-numpy
 
 __all__ = ["eucldist"]
+
+
 @jit
 def sqeucldist_simple(a, b = None):
     a_sumrows = np.einsum('ij,ij->i', a, a)

@@ -1,1 +1,1 @@
-from . import (rkhs, kern)
+from . import (core, kern, reduce, rkhs, utilities)
