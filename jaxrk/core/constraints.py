@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import jax.numpy as np, jax.scipy as sp
 from jax.scipy.special import expit, logit
 from typing import Callable, Union
+
+from numpy.core.defchararray import upper
 from ..core.typing import Bijection
 import jax.lax as lax
 
@@ -30,9 +32,6 @@ class SoftPlus(Bijection):
         y = y - self.lower_bound
         return np.where(y >= 1, y, np.log(np.exp(y) - 1) + 1)
 
-
-def squareplus(x):
-  return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
 class SoftMinus(Bijection):
     def __init__(self, upper_bound:float = 0.):
         assert upper_bound is not None
@@ -43,17 +42,28 @@ class SoftMinus(Bijection):
     
     def inv(self, y):
         return -self.sp.inv(y)
+
+class FlipLowerBound(Bijection):
+    def __init__(self, upper_bound:float, lb_bij:Callable[..., Bijection]):
+        assert upper_bound is not None
+        self.lb = lb_bij(-upper_bound)
+    
+    def __call__(self, x):
+        return self.lb.__call__(-x)
+    
+    def inv(self, y):
+        return -self.lb.inv(y)
     
     
-def SoftBd(lower_bound:float = None, upper_bound:float = None) -> Union[Sigmoid, SoftPlus, SoftMinus]:
-    if lower_bound is None:
-        assert upper_bound is not None, "Require one bound."
-        return SoftMinus(upper_bound)
-    elif upper_bound is None:
-        assert lower_bound is not None, "Require one bound."
-        return SoftPlus(lower_bound)
+def SoftBound(l:float = None, u:float = None) -> Bijection:
+    if l is None:
+        assert u is not None, "Require one bound."
+        return FlipLowerBound(u, SoftPlus)
+    elif u is None:
+        assert l is not None, "Require one bound."
+        return SoftPlus(l)
     else:
-        return Sigmoid(lower_bound, upper_bound)
+        return Sigmoid(l, u)
 
 @dataclass
 class CholeskyBijection(Bijection):

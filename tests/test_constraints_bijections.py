@@ -1,13 +1,13 @@
 import jax.numpy as np
-from jaxrk.core.constraints import SoftBd
+from jaxrk.core.constraints import SoftBound
 
 def test_simple_bijections(atol = 1e-3):
     for lb in (-0.4, 5.):
         for ub in (5.5, 6.):
             assert lb < ub
-            l = SoftBd(lower_bound=lb)
-            u = SoftBd(upper_bound=ub)
-            lu = SoftBd(lb, ub)
+            l = SoftBound(l=lb)
+            u = SoftBound(u=ub)
+            lu = SoftBound(lb, ub)
 
             x = np.linspace(lb - 0.01, ub + 0.01, 1000)
             lx = l(x)
