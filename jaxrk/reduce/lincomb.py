@@ -17,30 +17,31 @@ from jax.scipy.special import logsumexp
 from jax.lax import scan, map
 from jax import vmap
 from jax.ops import index_update
+from ..core.typing import  Array
 
 
 from .base import Reduce
 
-ListOfArray_or_Array_T = TypeVar("CombT", List[np.array], np.array)
+ListOfArray_or_Array_T = TypeVar("CombT", List[Array], Array)
 
 class SparseReduce(Reduce):
-    def __init__(self, idcs:List[np.array], #block_boundaries:np.array,
-                       average:bool = True):
-        """SparseReduce constructs a Gram matrix by summing/averaging over rows of its input
+    """SparseReduce constructs a Gram matrix by summing/averaging over rows of its input
 
         Args:
             idcs (List[np.array]): The indices of the rows to sum/average in the desired order. Each list element contains 2d arrays. The number of columns in the array is the number of summed/averaged elements.
-            average (bool): If True average rows, else sum rows.
-        """
+            average (bool): If True average rows, else sum rows."""
+
+    
+    def __init__(self, idcs:List[Array], average:bool = True, max_idx = None):
         super().__init__()
         self.idcs = idcs
-        self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
+        if max_idx is None:
+            self.max_idx = np.max(np.array([np.max(i) for i in idcs]))
         if average:
             self._reduce = np.mean
         else:
             self._reduce = np.sum
 
-    #@partial(jit, static_argnums=(0,))
     def reduce_first_ax(self, inp:np.array) -> np.array:
         assert (self.max_idx + 1) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
         assert len(inp.shape) == 2
@@ -82,22 +83,22 @@ class SparseReduce(Reduce):
         return un_sorted, cts_sorted, SparseReduce(el, mean)
 
 class BlockReduce(Reduce):
-    def __init__(self, block_boundaries:np.array,
-                       average:bool = True):
-        """BlockReduce constructs a larger Gram matrix by copying indices of a smaller one
+    """BlockReduce constructs a larger Gram matrix by copying indices of a smaller one
 
         Args:
             block_boundaries (np.array): Boundaries of blocks
             average (bool): wether or not to average
-        """
+    """
+
+    
+    def __init__(self, block_boundaries:Array, average:bool = True):
         super().__init__()
+        self.block_boundaries = block_boundaries
         if average:
             self._reduce = np.mean
         else:
             self._reduce = np.sum
-        self.block_boundaries = block_boundaries
 
-    #@partial(jit, static_argnums=(0,))
     def reduce_first_ax(self, inp:np.array) -> np.array:
         assert (self.block_boundaries[-1]) <= len(inp), self.__class__.__name__ + " expects a longer gram to operate on"
         assert len(inp.shape) == 2
@@ -124,21 +125,11 @@ class BlockReduce(Reduce):
         return BlockReduce(change, mean)
 
 class LinearReduce(Reduce):
-    def __init__(self, linear_map:np.array):
+    
+    def __init__(self, linear_map:Array):
         super().__init__()
         self.linear_map = linear_map
-    
-    @classmethod
-    def sum_from_unique(cls, input:np.array, mean:bool = True) -> Tuple[np.array, np.array, "LinearReduce"]:
-        un, cts = np.unique(input, return_counts=True)
-        un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
-        m = np.zeros((len(un_idx), input.shape[0]))
-        for i, idx in enumerate(un_idx):
-            b = np.ones(int(cts[i].squeeze())).squeeze()
-            m = m.at[i, idx.squeeze()].set(b/cts[i].squeeze() if mean else b)
-        return un, cts, LinearReduce(m)
-    
-   
+
     def reduce_first_ax(self, inp:np.array):
         assert len(inp.shape) == 2
         assert self.linear_map.shape[1] == inp.shape[0]
@@ -147,3 +138,13 @@ class LinearReduce(Reduce):
     def new_len(self, original_len:int):
         assert (self.linear_map.shape[1]) == original_len, self.__class__.__name__ + " expects a gram with %d columns" % self.linear_map.shape[1]
         return self.linear_map.shape[0]
+
+    @classmethod
+    def sum_from_unique(cls, input:Array, mean:bool = True) -> Tuple[np.array, np.array, "LinearReduce"]:
+        un, cts = np.unique(input, return_counts=True)
+        un_idx = [np.argwhere(input == un[i]).flatten() for i in range(un.size)]
+        m = np.zeros((len(un_idx), input.shape[0]))
+        for i, idx in enumerate(un_idx):
+            b = np.ones(int(cts[i].squeeze())).squeeze()
+            m = m.at[i, idx.squeeze()].set(b/cts[i].squeeze() if mean else b)
+        return un, cts, LinearReduce(m)

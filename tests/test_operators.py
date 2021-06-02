@@ -39,7 +39,7 @@ def test_apply_matmul():
     res_e2 = (oper @ x_e2)
     res_v = (oper @ x_fv)
     assert np.allclose(res_e1.prefactors, (oper.matr @ oper.inp_feat.inner(x_e1)).flatten()), "Application of operator to RKHS element failed."
-    assert np.allclose(res_v.inspace_points, np.vstack([res_e1.inspace_points, res_e2.inspace_points] )), "Application of operator to all vectors in RKHS vector failed at inspace points."
+    assert np.allclose(res_v.insp_pts, np.vstack([res_e1.insp_pts, res_e2.insp_pts] )), "Application of operator to all vectors in RKHS vector failed at inspace points."
     assert np.allclose(res_v.prefactors, np.hstack([res_e1.prefactors, res_e2.prefactors])), "Application of operator to all vectors in RKHS vector failed."
     assert np.allclose((oper @ oper).matr, oper.inp_feat.inner(oper.outp_feat)), "Application of operator to operator failed."
 
@@ -59,7 +59,7 @@ def test_FiniteMap():
     n_rvs = 50
     rv_fvec = FiniteVec(gk_x, random.normal(rng, (n_rvs, 1)) * 5, np.ones(n_rvs))
     C3 = FiniteMap(rv_fvec, rv_fvec, np.eye(n_rvs))
-    assert np.allclose((C3 @ C1).matr, gk_x(rv_fvec.inspace_points, ref_fvec.inspace_points) @ C1.matr, 0.001, 0.001)
+    assert np.allclose((C3 @ C1).matr, gk_x(rv_fvec.insp_pts, ref_fvec.insp_pts) @ C1.matr, 0.001, 0.001)
 
 
 def test_CovOp(plot = False, center = False):   
@@ -95,15 +95,15 @@ def test_CovOp(plot = False, center = False):
     
 
 
-    targp = np.exp(targ.logpdf(ref_fvec.inspace_points.squeeze())).squeeze()
+    targp = np.exp(targ.logpdf(ref_fvec.insp_pts.squeeze())).squeeze()
     estp = np.squeeze(inner(dens_obj, ref_fvec))
     estp2 = np.squeeze(inner(dens_obj, ref_fvec))
     est_sup = unif_obj(x).squeeze()
     assert (np.abs(targp.squeeze()-estp).mean() < 0.8), "Estimated density strongly deviates from true density"
     if plot:
-        pl.plot(ref_fvec.inspace_points.squeeze(), estp/np.max(estp) * np.max(targp), "b--", label="scaled estimate")
-        pl.plot(ref_fvec.inspace_points.squeeze(), estp2/np.max(estp2) * np.max(targp), "g-.", label="scaled estimate (uns)")
-        pl.plot(ref_fvec.inspace_points.squeeze(), targp, label = "truth")
+        pl.plot(ref_fvec.insp_pts.squeeze(), estp/np.max(estp) * np.max(targp), "b--", label="scaled estimate")
+        pl.plot(ref_fvec.insp_pts.squeeze(), estp2/np.max(estp2) * np.max(targp), "g-.", label="scaled estimate (uns)")
+        pl.plot(ref_fvec.insp_pts.squeeze(), targp, label = "truth")
         pl.plot(x.squeeze(), est_sup.squeeze(), label = "support")
         
         #pl.plot(ref_fvec.inspace_points.squeeze(), np.squeeze(inner(unif_obj, ref_fvec)), label="unif")
@@ -153,13 +153,13 @@ def test_Cdmo(plot = False):
         print(np.abs(cm.const_cent_term - maps[center]["dens"].const_cent_term).max())
 
     ests = {map_type:
-                    {cent: np.array([maps[cent][map_type](x).dens_proj()(refervec.inspace_points).squeeze()
+                    {cent: np.array([maps[cent][map_type](x).dens_proj()(refervec.insp_pts).squeeze()
                                         for x in x_vals])
                         for cent in cent_vals}
             for map_type in ["emb", "dens"]}
 
                                              
-    t = np.array([true_dens(np.hstack([np.repeat(x, len(refervec.inspace_points), 0), refervec.inspace_points]))
+    t = np.array([true_dens(np.hstack([np.repeat(x, len(refervec.insp_pts), 0), refervec.insp_pts]))
                                 for x in x_vals])
     if plot:
         import matplotlib.pyplot as plt
@@ -167,7 +167,7 @@ def test_Cdmo(plot = False):
         (fig, ax) = plt.subplots(len(site_vals) + 1, 1, False, False)
 
         for i, site in enumerate(site_vals):
-            ax[i].plot(refervec.inspace_points, t[i], linewidth=2, color="b", label = "true dens", alpha = 0.5)
+            ax[i].plot(refervec.insp_pts, t[i], linewidth=2, color="b", label = "true dens", alpha = 0.5)
             for map_type in ["emb", "dens"]:
                 for cent in cent_vals:
                     if map_type == "emb":
@@ -178,7 +178,7 @@ def test_Cdmo(plot = False):
                         style = ":"
                     else:
                         style= "--"
-                    ax[i].plot(refervec.inspace_points, ests[map_type][cent][i], style, color = color, label = map_type+" "+("cent" if cent else "unc"), alpha = 0.5)
+                    ax[i].plot(refervec.insp_pts, ests[map_type][cent][i], style, color = color, label = map_type+" "+("cent" if cent else "unc"), alpha = 0.5)
 
         ax[-1].scatter(*rvs.T)
         fig.legend()
@@ -230,19 +230,19 @@ def test_Cdo_timeseries(plot = False):
                                                             lambda samps: np.squeeze(inner((cd@ FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps))))),
                                                             lambda samps: np.squeeze(inner((cm@ FiniteVec.construct_RKHS_Elem(invec.k, x2)).normalized().pos_proj().normalized(), FiniteVec(refervec.k, samps, prefactors=np.ones(len(samps)))))]
 
-    t = np.array((true_x1(refervec.inspace_points), true_x2(refervec.inspace_points)))
-    e = np.array((est_x1(refervec.inspace_points), est_x2(refervec.inspace_points)))
+    t = np.array((true_x1(refervec.insp_pts), true_x2(refervec.insp_pts)))
+    e = np.array((est_x1(refervec.insp_pts), est_x2(refervec.insp_pts)))
     if plot:
         import pylab as pl
 
         (fig, ax) = pl.subplots(1, 3, False, False)
-        ax[0].plot(refervec.inspace_points, t[0])
-        ax[0].plot(refervec.inspace_points, e[0], "--", label = "dens")
-        ax[0].plot(refervec.inspace_points, este_x1(refervec.inspace_points), "-.", label = "emb")
+        ax[0].plot(refervec.insp_pts, t[0])
+        ax[0].plot(refervec.insp_pts, e[0], "--", label = "dens")
+        ax[0].plot(refervec.insp_pts, este_x1(refervec.insp_pts), "-.", label = "emb")
         
-        ax[1].plot(refervec.inspace_points, t[1])
-        ax[1].plot(refervec.inspace_points, e[1], "--", label = "dens")
-        ax[1].plot(refervec.inspace_points, este_x2(refervec.inspace_points),"-.", label = "emb")
+        ax[1].plot(refervec.insp_pts, t[1])
+        ax[1].plot(refervec.insp_pts, e[1], "--", label = "dens")
+        ax[1].plot(refervec.insp_pts, este_x2(refervec.insp_pts),"-.", label = "emb")
 
         ax[2].scatter(*rvs.T)
         fig.legend()

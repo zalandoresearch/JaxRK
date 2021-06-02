@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod, ABC
+from ..core.typing import Array
+import flax.linen as ln
+from typing import NewType, TypeVar, Generic, Sized, Union
 
-from typing import NewType, TypeVar, Generic, Sized
 
-class RkhsObject(object):
-    pass
-
-class Vec(RkhsObject, Sized):
+class Vec(Sized, ABC):
     @abstractmethod
     def reduce_gram(self, gram, axis = 0):
         pass
@@ -14,19 +13,19 @@ class Vec(RkhsObject, Sized):
     def inner(self, Y=None, full=True):
         pass
 
-    @abstractmethod
-    def __len__(self):
-        pass
-
 InpVecT = TypeVar("InpVecT", bound=Vec)
 OutVecT = TypeVar("OutVecT", bound=Vec)
 
+#The following is input to a map RhInpVectT -> InpVecT
+RhInpVectT = TypeVar("RhInpVectT", bound=Vec) 
 
-class Map(RkhsObject, Generic[InpVecT, OutVecT]):
-    """A vectorized map from InpVecT vectors to OutVecT vectors.
-    """
+CombT = TypeVar("CombT", "LinOp[RhInpVectT, InpVecT]", InpVecT, Array)
+
+
+class LinOp(Vec, Generic[InpVecT, OutVecT], ABC):
     @abstractmethod
-    def __len__(self):
+    def __matmul__(self, right_inp:CombT) -> Union[OutVecT, "LinOp[RhInpVectT, OutVecT]"]:
         pass
-    
+
+RkhsObject = Union[Vec, LinOp]
 

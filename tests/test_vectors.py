@@ -26,15 +26,15 @@ def test_FiniteVec(D, kernel, N):
     X = rng.randn(N, D)
     rv = FiniteVec(kernel, X, [Prefactors(np.ones(len(X)).astype(np.float32))])
     rv2 = FiniteVec.construct_RKHS_Elem(kernel, rng.randn(N + 1, D), np.ones(N + 1).astype(np.float32))
-    assert np.allclose(inner(rv, rv), rv.k(rv.inspace_points, rv.inspace_points)*np.outer(rv.reduce[0].prefactors, rv.reduce[0].prefactors)) , "Simple vector computation not accurate"
-    assert np.allclose(inner(rv, rv2), (rv.k(rv.inspace_points, rv2.inspace_points)*np.outer(rv.reduce[0].prefactors, rv2.reduce[0].linear_map)).sum(1, keepdims=True)), "Simple vector computation not accurate"
+    assert np.allclose(inner(rv, rv), rv.k(rv.insp_pts, rv.insp_pts)*np.outer(rv.reduce[0].prefactors, rv.reduce[0].prefactors)) , "Simple vector computation not accurate"
+    assert np.allclose(inner(rv, rv2), (rv.k(rv.insp_pts, rv2.insp_pts)*np.outer(rv.reduce[0].prefactors, rv2.reduce[0].linear_map)).sum(1, keepdims=True)), "Simple vector computation not accurate"
 
     N = 4
     X = rng.randn(N, D)
 
     rv = FiniteVec(kernel, X, [Prefactors(np.ones(len(X))/2), BalancedSum(2)])
     el = FiniteVec.construct_RKHS_Elem(kernel, X, np.ones(N))
-    gram = el.k(el.inspace_points)
+    gram = el.k(el.insp_pts)
     assert np.allclose(inner(el, el), np.sum(gram))
     assert np.allclose(np.squeeze(inner(el, rv)), np.sum(gram, 1).reshape(-1,2).mean(1))
 
