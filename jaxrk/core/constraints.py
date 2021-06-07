@@ -8,66 +8,68 @@ from ..core.typing import Bijection
 import jax.lax as lax
 
 
-class Sigmoid(Bijection):
-    def __init__(self, lower_bound:float, upper_bound:float):
+
+def squareplus(x):
+  return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
+
+def squareplus_deriv(x):    
+  return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
+class SquashingToBounded(Bijection):
+    def __init__(self, lower_bound:float, upper_bound:float, f = squareplus_deriv):
         assert lower_bound < upper_bound
         assert lower_bound is not None and upper_bound is not None
-        self.lower_bound, self.upper_bound = lower_bound, upper_bound
+        self.lower_bound = lower_bound
+        self.scale = upper_bound - lower_bound
+        self.f = f
 
     def __call__(self, x):
-        ex = np.exp(-x)
-        return (self.upper_bound + self.lower_bound * ex) / (1 + ex)
+        return self.scale * np.clip(self.f(x), 0., 1.) + self.lower_bound
 
     def inv(self, y):
+        raise NotImplementedError
         return -np.log((self.upper_bound - self.lower_bound)/(y - self.lower_bound) - 1)
-class SoftPlus(Bijection):
-    def __init__(self, lower_bound:float = 0.):
+class NonnegToLowerBd(Bijection):
+    def __init__(self, lower_bound:float = 0., f = squareplus ):
         assert lower_bound is not None
         self.lower_bound = lower_bound
+        self.f = f
 
     def __call__(self, x):
-        return np.where(x >= 1, x, np.log(1 + np.exp(x - 1))) + self.lower_bound
-
+        return np.clip(self.f(x), 0.) + self.lower_bound
+    
     def inv(self, y):
+        raise NotImplementedError
         y = y - self.lower_bound
-        return np.where(y >= 1, y, np.log(np.exp(y) - 1) + 1)
+        return self.f_inv(y)
 
-class SoftMinus(Bijection):
-    def __init__(self, upper_bound:float = 0.):
-        assert upper_bound is not None
-        self.sp = SoftPlus(-upper_bound)
-    
-    def __call__(self, x):
-        return self.sp.__call__(-x)
-    
-    def inv(self, y):
-        return -self.sp.inv(y)
-
-class FlipLowerBound(Bijection):
+class FlipLowerToUpperBound(Bijection):
     def __init__(self, upper_bound:float, lb_bij:Callable[..., Bijection]):
         assert upper_bound is not None
         self.lb = lb_bij(-upper_bound)
     
     def __call__(self, x):
-        return self.lb.__call__(-x)
+        return -self.lb.__call__(-x)
     
     def inv(self, y):
         return -self.lb.inv(y)
+
+def NonnegToUpperBd(upper_bound:float = 0.):
+    return FlipLowerToUpperBound(upper_bound, NonnegToLowerBd)
     
     
 def SoftBound(l:float = None, u:float = None) -> Bijection:
     if l is None:
         assert u is not None, "Require one bound."
-        return FlipLowerBound(u, SoftPlus)
+        return NonnegToUpperBd(u)
     elif u is None:
         assert l is not None, "Require one bound."
-        return SoftPlus(l)
+        return NonnegToLowerBd(l)
     else:
-        return Sigmoid(l, u)
+        return SquashingToBounded(l, u)
 
 @dataclass
 class CholeskyBijection(Bijection):
-    diag_bij:Bijection = SoftPlus()
+    diag_bij:Bijection = NonnegToLowerBd()
     lower:bool = True
 
     def _standardize(self, inp):

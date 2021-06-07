@@ -2,7 +2,7 @@
 from typing import Callable, Tuple, Union, Optional
 from ..core.typing import PRNGKeyT, Shape, Dtype, Array, ConstOrInitFn
 from functools import partial
-from ..core.constraints import SoftPlus, Bijection, SoftBound, Sigmoid
+from ..core.constraints import NonnegToLowerBd, Bijection, SoftBound, SquashingToBounded
 from ..core.init_fn import ConstFn
 from dataclasses import dataclass
 from flax.linen.module import compact
@@ -38,8 +38,8 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
     def make_unconstr(cls,
                       scale:Array,
                       shape:float,
-                      scale_bij: Bijection = SoftPlus(),
-                      shape_bij: Bijection = Sigmoid(0., 2.)) -> "GenGaussKernel":
+                      scale_bij: Bijection = NonnegToLowerBd(),
+                      shape_bij: Bijection = SquashingToBounded(0., 2.)) -> "GenGaussKernel":
         """Factory for constructing a GenGaussKernel from unconstrained parameters.
            The constraints for each parameters are then guaranteed by applying their accompanying bijections.
             Args:
@@ -114,8 +114,8 @@ class PeriodicKernel(Kernel):
     def make_unconstr(cls,
                       period:float,
                       length_scale:float,
-                      period_bij: Bijection = SoftPlus(),
-                      length_scale_bij: Bijection = SoftPlus()) -> "PeriodicKernel":
+                      period_bij: Bijection = NonnegToLowerBd(),
+                      length_scale_bij: Bijection = NonnegToLowerBd()) -> "PeriodicKernel":
         """Factory for constructing a PeriodicKernel from unconstrained parameters.
            The constraints for each parameters are then guaranteed by applying their accompanying bijections.
             Args:
@@ -157,9 +157,9 @@ class ThreshSpikeKernel(Kernel):
              spike:float,
              non_spike:float,
              threshold:float,
-             scale_bij: Bijection = SoftPlus(),
-             shape_bij: Bijection = SoftPlus(),
-             spike_bij: Bijection = SoftPlus(),
+             scale_bij: Bijection = NonnegToLowerBd(),
+             shape_bij: Bijection = NonnegToLowerBd(),
+             spike_bij: Bijection = NonnegToLowerBd(),
              non_spike_bij: Bijection = SoftBound(u = 1.),
              threshold_bij: Bijection = SoftBound(l = 0.)) -> "ThreshSpikeKernel":
         """Factory for constructing a PeriodicKernel from unconstrained parameters.

@@ -5,7 +5,7 @@ from numpy.core.fromnumeric import squeeze
 from ..reduce.lincomb import LinearReduce
 from ..reduce.base import Prefactors, Sum, Mean
 from time import time
-from typing import Generic, TypeVar, List, Callable
+from typing import Generic, TypeVar, List, Callable, Union
 
 import jax
 import jax.numpy as np
@@ -33,9 +33,10 @@ class FiniteVec(Vec):
     """
     
 
-    def __init__(self, k:Kernel, insp_pts: Array, reduce:List[Reduce] = []):
+    def __init__(self, k:Kernel, insp_pts: Union[Vec, Array], reduce:List[Reduce] = []):
         super().__init__()
-        assert(len(insp_pts.shape) == 2)
+        if not isinstance(insp_pts, Vec):
+            assert len(insp_pts.shape) == 2
         if reduce is None:
             self.reduce = []
         else:
@@ -231,6 +232,7 @@ class CombVec(Vec, Generic[VrightT, VleftT]):
         assert(len(vR) == len(vL))
         self.vR, self.vL = vR, vL
         self.reduce = reduce
+        self.operation = operation
         self.__len = Reduce.final_len(len(self.vR), reduce)
 
     
@@ -241,7 +243,7 @@ class CombVec(Vec, Generic[VrightT, VleftT]):
         if Y is None:
             Y = self
         else:
-            assert(Y.combine == self.combine)
+            assert(Y.operation == self.operation)
         return self.reduce_gram(Y.reduce_gram(self.operation(self.vR.inner(Y.vR), self.vL.inner(Y.vL)), 1), 0)
     
     def extend_reduce(self, r:List[Reduce]) -> "CombVec":
@@ -257,7 +259,7 @@ class CombVec(Vec, Generic[VrightT, VleftT]):
  
 
     def __len__(self):
-        if self._reduce is None:
+        if self.reduce is None:
             return len(self.vR)
         else:
             return self.__len

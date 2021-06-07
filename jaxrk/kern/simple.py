@@ -16,7 +16,7 @@ from ..core.init_fn import ConstFn, ConstIsotropicFn
 import flax.linen as ln
 from ..core.typing import ConstOrInitFn
 from ..core.init_fn import ConstFn, ConstIsotropicFn
-from ..core.constraints import SoftPlus, Bijection, CholeskyBijection
+from ..core.constraints import NonnegToLowerBd, Bijection, CholeskyBijection
 from ..utilities.views import tile_view
 
 class FeatMapKernel(Kernel):
@@ -74,7 +74,7 @@ class DictKernel(Kernel):
             self.gram_values = gram_values
 
     @classmethod
-    def make_unconstr(cls, cholesky_lower:Array, diag_bij:Bijection = SoftPlus(0.1)) -> "DictKernel":
+    def make_unconstr(cls, cholesky_lower:Array, diag_bij:Bijection = NonnegToLowerBd(0.1)) -> "DictKernel":
         """Make a DictKernel from unconstrained parameters.
 
         Args:
@@ -125,12 +125,10 @@ class DictKernel(Kernel):
         return cls(d, gram_values = m[reorder,:][:,reorder])
 
     def __call__(self, idx_X, idx_Y=None, diag = False):
-        assert len(np.shape(idx_X))==2 and (idx_Y is None or len(np.shape(idx_Y))==2)
+        assert (len(np.shape(idx_X))==2) and (idx_Y is None or len(np.shape(idx_Y))==2)
         assert idx_X.shape[1] == 1 and (idx_Y is None or idx_X.shape[1] == idx_Y.shape[1])
         if idx_Y is None:
             idx_Y = idx_X
-        idx_X = idx_X.reshape(-1)
-        idx_Y = idx_Y.reshape(-1)
         if diag:
             return self.gram_values[idx_X, idx_Y]
         else:
@@ -138,4 +136,4 @@ class DictKernel(Kernel):
             #using https://stackoverflow.com/questions/5564098/repeat-numpy-array-without-replicating-data
             #and https://github.com/google/jax/issues/3171
             #as starting points
-            return self.gram_values[np.repeat(idx_X, idx_Y.size), tile_view(idx_Y, idx_X.size)].reshape((idx_X.size, idx_Y.size))
+            return self.gram_values[np.repeat(idx_X, idx_Y.size).squeeze(), tile_view(idx_Y, idx_X.size).squeeze()].reshape((idx_X.size, idx_Y.size))

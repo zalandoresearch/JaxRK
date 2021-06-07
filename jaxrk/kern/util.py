@@ -3,7 +3,7 @@ import jax.numpy as np
 
 from typing import Union
 
-from ..core.constraints import SoftPlus
+from ..core.constraints import NonnegToLowerBd
 from ..core.init_fn import ConstFn
 from ..core.typing import *
 from ..utilities.distances import dist
@@ -50,7 +50,7 @@ class SimpleScaler(Scaler):
         self.s = scale
     
     @classmethod
-    def make_unconstr(cls, scale:Union[Array, float], bij: Bijection = SoftPlus()) -> "SimpleScaler":
+    def make_unconstr(cls, scale:Union[Array, float], bij: Bijection = NonnegToLowerBd()) -> "SimpleScaler":
         return SimpleScaler(bij(scale))
 
     def inv(self):
