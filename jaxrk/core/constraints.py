@@ -13,9 +13,15 @@ def squareplus(x):
     #(x + np.sqrt(x**2 + 4))/2
     return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
 
+def inv_squareplus(y):
+    #(y**2-1)/y
+    return lax.div(lax.sub(lax.square(y), 1.), y)
+
 def squareplus_deriv(x):
-    #(1 + x/np.sqrt(4 + x**2))/2   
+    #(1 + x/np.sqrt(4 + x**2))/2
     return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
+
+
 
 class SquashingToBounded(Bijection):
     def __init__(self, lower_bound:float, upper_bound:float, f = squareplus_deriv):
@@ -31,6 +37,7 @@ class SquashingToBounded(Bijection):
     def inv(self, y):
         raise NotImplementedError
         return -np.log((self.upper_bound - self.lower_bound)/(y - self.lower_bound) - 1)
+
 class NonnegToLowerBd(Bijection):
     def __init__(self, lower_bound:float = 0., f = squareplus ):
         assert lower_bound is not None
