@@ -10,10 +10,13 @@ import jax.lax as lax
 
 
 def squareplus(x):
-  return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
+    #(x + np.sqrt(x**2 + 4))/2
+    return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
 
-def squareplus_deriv(x):    
-  return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
+def squareplus_deriv(x):
+    #(1 + x/np.sqrt(4 + x**2))/2   
+    return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
+
 class SquashingToBounded(Bijection):
     def __init__(self, lower_bound:float, upper_bound:float, f = squareplus_deriv):
         assert lower_bound < upper_bound
