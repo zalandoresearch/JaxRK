@@ -56,10 +56,10 @@ class NonnegToLowerBd(Bijection):
         self.bij = bij
 
     def __call__(self, x):
-        return np.clip(self.f(x), 0.) + self.lower_bound
+        return np.clip(self.bij(x), 0.) + self.lower_bound
     
     def inv(self, y):
-        return self.inv_f(y - self.lower_bound)
+        return self.bij.inv(y - self.lower_bound)
 
 class FlipLowerToUpperBound(Bijection):
     def __init__(self, upper_bound:float, lb_bij:Callable[..., Bijection]):
