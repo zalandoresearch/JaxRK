@@ -33,11 +33,10 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
         self.dist = dist
         self.nconst = self.dist.power / (2 * self.dist._get_scale_param() * np.exp(sp.special.gammaln(1. / self.dist.power)))
 
-
     @classmethod
     def make_unconstr(cls,
-                      scale:Array,
-                      shape:float,
+                      unconstr_scale:Array,
+                      unconstr_shape:float,
                       scale_bij: Bijection = NonnegToLowerBd(),
                       shape_bij: Bijection = SquashingToBounded(0., 2.)) -> "GenGaussKernel":
         """Factory for constructing a GenGaussKernel from unconstrained parameters.
@@ -48,8 +47,18 @@ class GenGaussKernel(DensityKernel): #this is the gennorm distribution from scip
                 scale_bij (Bijection): Bijection mapping from unconstrained real numbers to non-negative numbers. Defaults to SoftPlus.
                 shape_bij (Bijection): Bijection mapping from unconstrained real numbers to half-open interval (0,2]. Defaults to Sigmoid(0., 2.).
         """
-        return cls.make(scale_bij(scale), shape_bij(shape))
-    
+        return cls.make(scale_bij(unconstr_scale), shape_bij(unconstr_shape))
+
+    @classmethod
+    def init_from_constrained(cls,
+                              constr_scale:Array,
+                              constr_shape:float,
+                              scale_bij: Bijection = NonnegToLowerBd(),
+                              shape_bij: Bijection = SquashingToBounded(0., 2.)):
+        """Return unconstrained init values from parameters by applying the inverse of the bijection
+           that belongs to the parameter."""
+        return scale_bij.inv(constr_scale), shape_bij.inv(constr_shape)
+
     @classmethod
     def make(cls,
              length_scale:Array,
@@ -112,8 +121,8 @@ class PeriodicKernel(Kernel):
     
     @classmethod
     def make_unconstr(cls,
-                      period:float,
-                      length_scale:float,
+                      unconstr_period:float,
+                      unconstr_length_scale:float,
                       period_bij: Bijection = NonnegToLowerBd(),
                       length_scale_bij: Bijection = NonnegToLowerBd()) -> "PeriodicKernel":
         """Factory for constructing a PeriodicKernel from unconstrained parameters.
@@ -127,7 +136,17 @@ class PeriodicKernel(Kernel):
         Returns:
             PeriodicKernel: The constructed kernel.
         """
-        return cls(period_bij(period), length_scale_bij(length_scale))
+        return cls(period_bij(unconstr_period), length_scale_bij(unconstr_length_scale))
+    
+    @classmethod
+    def init_from_constrained(cls,
+                              constr_period:float,
+                              constr_length_scale:float,
+                              period_bij: Bijection = NonnegToLowerBd(),
+                              length_scale_bij: Bijection = NonnegToLowerBd()):
+        """Return unconstrained init values from parameters by applying the inverse of the bijection
+           that belongs to the parameter."""
+        return period_bij.inv(constr_period), length_scale_bij.inv(constr_length_scale)
     
 
     def __call__(self, X, Y=None, diag = False,):
