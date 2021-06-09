@@ -8,51 +8,52 @@ from ..core.typing import Bijection
 import jax.lax as lax
 
 
-def softplus(x):
-    return np.log( 1 +np.exp(x))
+class Softplus(Bijection):
+    def __call__(self, x):
+        return np.log( 1 +np.exp(x))
 
-def inv_softplus(y):
-    return np.log(np.exp(y) - 1)
+    def inv(self, y):
+        return np.log(np.exp(y) - 1)
 
-def squareplus(x):
-    #(x + np.sqrt(x**2 + 4))/2
-    return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
+class SquarePlus(Bijection):
+    def __call__(self, x):
+        #(x + np.sqrt(x**2 + 4))/2
+        return lax.mul(0.5, lax.add(x, lax.sqrt(lax.add(lax.square(x), 4.))))
 
-def inv_squareplus(y):
-    #(y**2-1)/y
-    return lax.div(lax.sub(lax.square(y), 1.), y)
+    def inv(self, y):
+        #(y**2-1)/y
+        return lax.div(lax.sub(lax.square(y), 1.), y)
 
-def squareplus_deriv(x):
-    #(1 + x/np.sqrt(4 + x**2))/2
-    return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
-
-def inv_squareplus_deriv(y):
-    pos_res = np.sqrt((-4.* y**2 + 4. * y - 1)/(y**2 - y))
-    return  np.where(y < 0.5, -pos_res, pos_res)  #2. / np.sqrt(1./np.sqrt(2*y - 2) - 1)
+class SquareSquash(Bijection):
+    def __call__(self, x):
+        #(1 + x/np.sqrt(4 + x**2))/2
+        return lax.mul(0.5, lax.add(lax.div(x, lax.sqrt(lax.add(lax.square(x), 4.))), 1.))
+    
+    def inv(self, y):
+        pos_res = np.sqrt((-4.* y**2 + 4. * y - 1)/(y**2 - y))
+        return  np.where(y < 0.5, -pos_res, pos_res)  #2. / np.sqrt(1./np.sqrt(2*y - 2) - 1)
 
 
 
 class SquashingToBounded(Bijection):
-    def __init__(self, lower_bound:float, upper_bound:float, f = squareplus_deriv, inv_f = inv_squareplus_deriv):
+    def __init__(self, lower_bound:float, upper_bound:float, bij:Bijection = SquareSquash()):
         assert lower_bound < upper_bound
         assert lower_bound is not None and upper_bound is not None
         self.lower_bound = lower_bound
         self.scale = upper_bound - lower_bound
-        self.f = f
-        self.inv_f = inv_f
+        self.bij = bij
 
     def __call__(self, x):
-        return self.scale * np.clip(self.f(x), 0., 1.) + self.lower_bound
+        return self.scale * np.clip(self.bij(x), 0., 1.) + self.lower_bound
 
     def inv(self, y):
-        return self.inv_f((y-self.lower_bound) / self.scale)
+        return self.bij.inv((y-self.lower_bound) / self.scale)
 
 class NonnegToLowerBd(Bijection):
-    def __init__(self, lower_bound:float = 0., f = squareplus, inv_f = inv_squareplus):
+    def __init__(self, lower_bound:float = 0., bij:Bijection = SquarePlus()):
         assert lower_bound is not None
         self.lower_bound = lower_bound
-        self.f = f
-        self.inv_f = inv_f
+        self.bij = bij
 
     def __call__(self, x):
         return np.clip(self.f(x), 0.) + self.lower_bound
@@ -87,7 +88,7 @@ def SoftBound(l:float = None, u:float = None) -> Bijection:
 
 @dataclass
 class CholeskyBijection(Bijection):
-    diag_bij:Bijection = NonnegToLowerBd(f=softplus, inv_f=inv_softplus)
+    diag_bij:Bijection = NonnegToLowerBd(bij=Softplus)
     lower:bool = True
 
     def _standardize(self, inp):
