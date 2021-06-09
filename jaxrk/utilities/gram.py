@@ -1,3 +1,4 @@
+from jax import grad
 import jax.numpy as np
 import scipy as osp
 from numpy.random import rand

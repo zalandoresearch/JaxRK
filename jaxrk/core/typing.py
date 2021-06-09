@@ -1,3 +1,4 @@
+import jax.numpy as np
 from typing import Any, Tuple, Callable, Union
 
 __all__ = ["Bijection", "PRNGKeyT", "Shape", "Dtype", "Array", "InitFn", "ConstOrInitFn", "FloatOrInitFn", "AnyOrInitFn"]
@@ -6,7 +7,7 @@ __all__ = ["Bijection", "PRNGKeyT", "Shape", "Dtype", "Array", "InitFn", "ConstO
 PRNGKeyT = Any
 Shape = Tuple[int]
 Dtype = Any
-Array = Any
+Array = np.ndarray
 
 InitFn = Callable[..., Any]
 
