@@ -64,7 +64,7 @@ class DictKernel(Kernel):
         if gram_values is None:
             assert cholesky_lower is not None, "Exactly one of gram_values and cholesky_lower has to be defined."
             assert len(cholesky_lower.shape) == 2
-            assert cholesky_lower.size[0] == cholesky_lower.size[1]
+            assert cholesky_lower.shape[0] == cholesky_lower.shape[1]
             assert np.all(np.diag(cholesky_lower) > 0)
             self.gram_values = cholesky_lower @ cholesky_lower.T
         else:
